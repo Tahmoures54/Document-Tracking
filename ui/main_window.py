@@ -760,8 +760,8 @@ class MainWindow(QMainWindow):
         root.addWidget(self.custom_menu_bar)
 
         body_layout = QVBoxLayout()
-        body_layout.setContentsMargins(10, 10, 10, 10)
-        body_layout.setSpacing(8)
+        body_layout.setContentsMargins(14, 12, 14, 12)
+        body_layout.setSpacing(10)
 
         body_layout.addLayout(self._build_filters_and_actions())
         body_layout.addLayout(self._build_search_bar())
@@ -775,11 +775,11 @@ class MainWindow(QMainWindow):
     def _build_turquoise_banner(self) -> QWidget:
         banner = QWidget()
         banner.setObjectName("TopTurquoiseBanner")
-        banner.setFixedHeight(40)
+        banner.setFixedHeight(44)
 
         layout = QHBoxLayout(banner)
-        layout.setContentsMargins(15, 0, 15, 0)
-        layout.setSpacing(10)
+        layout.setContentsMargins(18, 0, 18, 0)
+        layout.setSpacing(12)
 
         title_label = QLabel("✨ سامانه جامع مدیریت، پیگیری هوشمند و گردش‌کار صورتجلسات")
         title_label.setStyleSheet("""
@@ -817,7 +817,7 @@ class MainWindow(QMainWindow):
 
     def _build_filters_and_actions(self) -> QHBoxLayout:
         bar = QHBoxLayout()
-        bar.setSpacing(6)
+        bar.setSpacing(8)
 
         def _combo(width: int, tip: str) -> QComboBox:
             cb = QComboBox()
@@ -874,7 +874,7 @@ class MainWindow(QMainWindow):
 
     def _build_pager(self) -> QHBoxLayout:
         bar = QHBoxLayout()
-        bar.setSpacing(8)
+        bar.setSpacing(10)
 
         self.btn_prev = QPushButton("▶ قبلی")
         self.btn_prev.setObjectName("btn_pager")
@@ -904,10 +904,10 @@ class MainWindow(QMainWindow):
 
     def _build_search_bar(self) -> QHBoxLayout:
         bar = QHBoxLayout()
-        bar.setSpacing(6)
+        bar.setSpacing(8)
 
         self.search = QLineEdit()
-        self.search.setPlaceholderText("🔎 جستجو بر اساس شماره صورتجلسه، موضوع، ارکان پروژه، دیسیپلین فنی...")
+        self.search.setPlaceholderText("🔎 جستجو در شماره، موضوع، کارفرما، پیمانکار و دیسیپلین...")
         self.search.setClearButtonEnabled(True)
         self.search.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
         self.search.setAlignment(Qt.AlignmentFlag.AlignRight)
