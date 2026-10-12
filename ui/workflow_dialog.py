@@ -76,10 +76,10 @@ def get_font(
 
 # ── ترجمه و رنگ‌بندی وضعیت‌ها ─────────────────
 STATUS_FA: Dict[str, str] = {
-    "pending": "در انتظار اقدام",
-    "in_progress": "در حال اقدام",
-    "completed": "تکمیل‌شده",
-    "rejected": "رد شده",
+    "pending": "در انتظار",
+    "in_progress": "در حال انجام",
+    "completed": "انجام شد",
+    "rejected": "رد شد",
 }
 STATUS_ICONS: Dict[str, str] = {
     "pending": "⏳",
@@ -517,6 +517,10 @@ class WorkflowDialog(QDialog):
         form.addRow("موضوع:", lbl(self.meeting.subject))
         form.addRow("پیمانکار:", lbl(self.meeting.contractor or "—"))
         form.addRow("تاریخ:", lbl(md))
+        tip = QLabel("راهنما: روی هر مرحله دوبار کلیک کنید یا از دکمه‌های پایین برای ثبت شروع/پایان استفاده کنید.")
+        tip.setStyleSheet("color: #64748b; font-size: 11px; font-style: italic;")
+        tip.setWordWrap(True)
+        form.addRow(tip)
         return box
 
     def _build_progress_bar(self) -> QProgressBar:
@@ -548,12 +552,12 @@ class WorkflowDialog(QDialog):
         self.table.setHorizontalHeaderLabels(
             [
                 "#",
-                "مرحله",
-                "تاریخ ورود",
-                "تاریخ خروج",
+                "مرحله کار",
+                "شروع",
+                "پایان",
                 "مسئول",
-                "امضا",
-                "یادداشت",
+                "تأیید",
+                "توضیح",
             ]
         )
         self.table.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
