@@ -76,10 +76,21 @@ def get_font(
 
 # ── ترجمه و رنگ‌بندی وضعیت‌ها ─────────────────
 STATUS_FA: Dict[str, str] = {
-    "pending": "در انتظار",
-    "in_progress": "در حال انجام",
-    "completed": "انجام شد",
-    "rejected": "رد شد",
+    "pending": "آماده اقدام",
+    "in_progress": "در حال اقدام",
+    "completed": "تکمیل شد",
+    "rejected": "عودت برای اصلاح",
+    "skipped": "رد شده / اجرا نشده",
+}
+
+# نام‌های نمایشی روشن‌تر برای پرونده‌های قدیمی؛ نام ذخیره‌شده و سوابق تغییر نمی‌کنند.
+STEP_NAME_LABELS: Dict[str, str] = {
+    "دریافت در دفتر کارفرما": "۱. ثبت و دریافت صورتجلسه در دفتر کارفرما",
+    "ارجاع به رئیس دفتر فنی": "۲. ارجاع پرونده به رئیس دفتر فنی",
+    "بررسی کارشناس": "۳. بررسی فنی و ثبت نظر کارشناس",
+    "تأیید رئیس دفتر فنی": "۴. کنترل و تأیید رئیس دفتر فنی",
+    "تأیید مدیر سایت": "۵. تأیید نهایی مدیر سایت",
+    "ابلاغ به پیمانکار": "۶. ابلاغ رسمی به پیمانکار و بستن پرونده",
 }
 STATUS_ICONS: Dict[str, str] = {
     "pending": "⏳",
@@ -97,12 +108,13 @@ STATUS_COLORS: Dict[str, QColor] = {
 # ایندکس ستون‌ها
 COL_IDX = 0
 COL_NAME = 1
-COL_ENTRY = 2
-COL_EXIT = 3
-COL_RESP = 4
-COL_SIGN = 5
-COL_NOTES = 6
-COL_COUNT = 7
+COL_STATUS = 2
+COL_ENTRY = 3
+COL_EXIT = 4
+COL_RESP = 5
+COL_SIGN = 6
+COL_NOTES = 7
+COL_COUNT = 8
 
 
 # ═══════════════════════════════════════════════
@@ -517,7 +529,7 @@ class WorkflowDialog(QDialog):
         form.addRow("موضوع:", lbl(self.meeting.subject))
         form.addRow("پیمانکار:", lbl(self.meeting.contractor or "—"))
         form.addRow("تاریخ:", lbl(md))
-        tip = QLabel("راهنما: روی هر مرحله دوبار کلیک کنید یا از دکمه‌های پایین برای ثبت شروع/پایان استفاده کنید.")
+        tip = QLabel("روش کار: مرحله جاری را انتخاب کنید؛ «شروع اقدام» را بزنید و پس از انجام کار، «تکمیل مرحله» را ثبت کنید. اگر نقصی وجود دارد، «عودت برای اصلاح» را همراه با علت ثبت کنید.")
         tip.setStyleSheet("color: #64748b; font-size: 11px; font-style: italic;")
         tip.setWordWrap(True)
         form.addRow(tip)
@@ -551,13 +563,14 @@ class WorkflowDialog(QDialog):
         self.table.setColumnCount(COL_COUNT)
         self.table.setHorizontalHeaderLabels(
             [
-                "#",
-                "مرحله کار",
-                "شروع",
-                "پایان",
-                "مسئول",
-                "تأیید",
-                "توضیح",
+                "ردیف",
+                "مرحله / اقدام مورد انتظار",
+                "وضعیت",
+                "تاریخ شروع",
+                "تاریخ پایان",
+                "مسئول اقدام",
+                "ثبت‌کننده / امضا",
+                "یادداشت و علت عودت",
             ]
         )
         self.table.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
@@ -569,7 +582,12 @@ class WorkflowDialog(QDialog):
                 hdr.setSectionResizeMode(col, QHeaderView.ResizeMode.Stretch)
             elif col == COL_IDX:
                 hdr.setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
-                self.table.setColumnWidth(col, 35)
+                self.table.setColumnWidth(col, 42)
+            elif col == COL_NAME:
+                hdr.setSectionResizeMode(col, QHeaderView.ResizeMode.Stretch)
+                self.table.setColumnWidth(col, 270)
+            elif col == COL_STATUS:
+                hdr.setSectionResizeMode(col, QHeaderView.ResizeMode.ResizeToContents)
             else:
                 hdr.setSectionResizeMode(
                     col, QHeaderView.ResizeMode.ResizeToContents
@@ -641,8 +659,15 @@ class WorkflowDialog(QDialog):
         )
         _btn(
             "btn_reopen",
-            "🔄 بازگشایی",
-            "بازگشایی ردیف رد شده  Ctrl+B",
+            "🔄 ادامه پس از اصلاح",
+            "بازگشایی مرحله عودت‌شده  Ctrl+B",
+        )
+        _btn(
+            "btn_reject",
+            "↩️ عودت برای اصلاح",
+            "ثبت علت نقص و بازگرداندن مرحله جاری برای اصلاح",
+            "#ffedd5",
+            "#9a3412",
         )
         _btn("btn_notes", "📝 یادداشت", "Ctrl+N")
         _btn("btn_perf", "📊 عملکرد", "گزارش آماری کارشناسان")
@@ -675,6 +700,7 @@ class WorkflowDialog(QDialog):
         self.btn_entry.clicked.connect(self.entry_step)
         self.btn_exit.clicked.connect(self.exit_step)
         self.btn_reopen.clicked.connect(self.reopen_step)
+        self.btn_reject.clicked.connect(self.reject_step)
         self.btn_prev.clicked.connect(self.go_to_previous_step)
         self.btn_notes.clicked.connect(self.edit_notes)
         self.btn_perf.clicked.connect(self.show_performance_report)
@@ -816,6 +842,11 @@ class WorkflowDialog(QDialog):
             self._set_row(i, step)
         self.table.resizeRowsToContents()
 
+    @staticmethod
+    def _step_label(step: WorkflowStep) -> str:
+        name = (step.step_name or "").strip()
+        return STEP_NAME_LABELS.get(name, name)
+
     def _set_row(self, row: int, step: WorkflowStep) -> None:
         sc = STATUS_COLORS.get(step.status)
         bg = QBrush(sc.lighter(185)) if sc else QBrush()
@@ -842,8 +873,12 @@ class WorkflowDialog(QDialog):
         icon = STATUS_ICONS.get(step.status, "")
 
         self.table.setItem(row, COL_IDX, cell(str(row + 1)))
+        name_it = cell(f"{icon} {self._step_label(step)}", False, True)
+        name_it.setToolTip(self._step_label(step))
+        self.table.setItem(row, COL_NAME, name_it)
+        status_text = STATUS_FA.get(step.status, step.status or "نامشخص")
         self.table.setItem(
-            row, COL_NAME, cell(f"{icon} {step.step_name}", False, True)
+            row, COL_STATUS, cell(f"{icon} {status_text}", center=True, bold=True)
         )
         self.table.setItem(row, COL_ENTRY, cell(entry))
         self.table.setItem(row, COL_EXIT, cell(exit_))
@@ -989,7 +1024,7 @@ class WorkflowDialog(QDialog):
             ic = STATUS_ICONS.get(active.status, "")
             la = STATUS_FA.get(active.status, active.status)
             self.lbl_status.setText(
-                f"{ic} مرحله فعال: {active.step_name} ({la})"
+                f"{ic} مرحله جاری: {self._step_label(active)} — وضعیت: {la}"
             )
             clr = "#1d4ed8" if active.status == "in_progress" else "#b45309"
             self.lbl_status.setStyleSheet(
@@ -1025,6 +1060,9 @@ class WorkflowDialog(QDialog):
             and selected is not None
             and selected.status == "rejected"
             and ip is None
+        )
+        self.btn_reject.setEnabled(
+            hw and selected is not None and selected.status == "in_progress"
         )
         self.btn_prev.setEnabled(
             hw
@@ -1087,15 +1125,16 @@ class WorkflowDialog(QDialog):
             return
 
         if self._has_unfinished_before(step):
-            reply = QMessageBox.question(
-                self,
-                "هشدار توالی",
-                "مراحل قبلی هنوز تکمیل نشده‌اند.\nادامه می‌دهید؟",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No,
+            previous = next(
+                s for s in sorted(self.steps, key=lambda item: item.step_order)
+                if s.step_order < step.step_order and s.status != "completed"
             )
-            if reply != QMessageBox.StandardButton.Yes:
-                return
+            self.toast.show_message(
+                f"ابتدا مرحله قبلی را تکمیل کنید: {self._step_label(previous)}",
+                color="#f59e0b",
+                duration_ms=5000,
+            )
+            return
 
         snap = self._snapshot_step(step)
         responsible = (step.responsible_person or "").strip() or self.current_user
@@ -1150,6 +1189,60 @@ class WorkflowDialog(QDialog):
         except Exception as exc:
             logger.exception("exit failed")
             self.toast.show_message(f"خطا: {exc}", color="#ef4444")
+
+    # ── عودت برای اصلاح ──
+
+    def reject_step(self) -> None:
+        """ثبت عودت مرحله جاری همراه با علت روشن برای پیگیری بعدی."""
+        if not self._need_write():
+            return
+        step = self._require_selected()
+        if not step:
+            return
+        if step.status != "in_progress":
+            self.toast.show_message(
+                "برای عودت، ابتدا مرحله را شروع کنید و سپس علت نقص را ثبت کنید.",
+                color="#f59e0b",
+            )
+            return
+
+        reason, ok = QInputDialog.getMultiLineText(
+            self,
+            "عودت مرحله برای اصلاح",
+            f"علت عودت «{self._step_label(step)}» را دقیق بنویسید:",
+            "",
+        )
+        reason = (reason or "").strip()
+        if not ok:
+            return
+        if not reason:
+            QMessageBox.warning(
+                self, "علت عودت الزامی است",
+                "برای پیگیری شفاف، لطفاً علت عودت را وارد کنید.",
+            )
+            return
+
+        snap = self._snapshot_step(step)
+        existing_notes = (step.notes or "").strip()
+        note = f"علت عودت: {reason}"
+        notes = f"{existing_notes}\n{note}" if existing_notes else note
+        try:
+            self.db.update_workflow_step(
+                step_id=step.id,
+                exit_date=date.today(),
+                signature=self.current_user,
+                status="rejected",
+                notes=notes,
+            )
+            self._load_steps()
+            self.toast.show_message(
+                f"↩️ «{self._step_label(step)}» عودت شد؛ علت ثبت شد.",
+                color="#c2410c",
+                undo_callback=lambda: self._apply_snapshot(snap),
+            )
+        except Exception as exc:
+            logger.exception("reject step failed")
+            self.toast.show_message(f"خطا در ثبت عودت: {exc}", color="#ef4444")
 
     # ── بازگشایی ردیف رد شده ──
 
@@ -1360,10 +1453,13 @@ class WorkflowDialog(QDialog):
             step.status in ("in_progress", "completed") and hw
         )
 
-        a_reopen = menu.addAction("🔄 بازگشایی")
+        a_reopen = menu.addAction("🔄 ادامه پس از اصلاح")
         a_reopen.setEnabled(
             step.status == "rejected" and hw and ip is None
         )
+
+        a_reject = menu.addAction("↩️ عودت برای اصلاح")
+        a_reject.setEnabled(step.status == "in_progress" and hw)
 
         menu.addSeparator()
         a_notes = menu.addAction("📝 یادداشت")
@@ -1383,6 +1479,7 @@ class WorkflowDialog(QDialog):
             a_exit: self.exit_step,
             a_rev: self.go_to_previous_step,
             a_reopen: self.reopen_step,
+            a_reject: self.reject_step,
             a_notes: self.edit_notes,
             a_perf: self.show_performance_report,
         }
@@ -1433,7 +1530,7 @@ class WorkflowDialog(QDialog):
         QMessageBox.information(
             self,
             "جزئیات گام",
-            f"📋 {step.step_name}\n"
+            f"📋 {self._step_label(step)}\n"
             f"وضعیت: {ic} {st}\n\n"
             f"📅 ورود: {entry}\n"
             f"📅 خروج: {exit_}\n\n"
