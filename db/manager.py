@@ -427,6 +427,67 @@ class DatabaseManager:
                 .one_or_none()
             )
 
+
+    def find_similar_meetings(
+        self,
+        contractor: Optional[str] = None,
+        location: Optional[str] = None,
+        drawing_number: Optional[str] = None,
+        subject: Optional[str] = None,
+        exclude_id: Optional[int] = None,
+        days_window: int = 90,
+        limit: int = 10,
+    ) -> List[Meeting]:
+        """
+        یافتن صورتجلسات مشابه برای هشدار احتمال تکرار/تقلب.
+        حداقل یکی از: پیمانکار + (محل کار یا شماره نقشه) باید مشخص باشد.
+        """
+        contractor = (contractor or "").strip()
+        location = (location or "").strip()
+        drawing_number = (drawing_number or "").strip()
+        subject = (subject or "").strip()
+
+        if not contractor:
+            return []
+        if not location and not drawing_number:
+            return []
+
+        with self.session() as sess:
+            q = sess.query(Meeting).filter(
+                Meeting.is_deleted.is_(False),
+                Meeting.contractor.isnot(None),
+                func.trim(Meeting.contractor) == contractor,
+            )
+            if exclude_id is not None:
+                q = q.filter(Meeting.id != exclude_id)
+
+            # محل کار یا شماره نقشه
+            loc_or_draw = []
+            if location:
+                loc_or_draw.append(func.trim(Meeting.location) == location)
+            if drawing_number:
+                loc_or_draw.append(func.trim(Meeting.drawing_number) == drawing_number)
+            if loc_or_draw:
+                q = q.filter(or_(*loc_or_draw))
+
+            # بازه زمانی تقریبی حول امروز / تاریخ ورود
+            try:
+                from datetime import timedelta
+                cutoff = date.today() - timedelta(days=max(1, days_window))
+                q = q.filter(
+                    or_(
+                        Meeting.entry_date >= cutoff,
+                        Meeting.meeting_date >= cutoff,
+                        Meeting.entry_date.is_(None),
+                    )
+                )
+            except Exception:
+                pass
+
+            rows = q.order_by(Meeting.id.desc()).limit(limit).all()
+            return list(rows)
+
+
     def update_meeting(self, meeting_id: int, data: Dict[str, Any]) -> Optional[Meeting]:
         with self.session() as sess:
             m = sess.get(Meeting, meeting_id)
