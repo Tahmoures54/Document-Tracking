@@ -834,20 +834,25 @@ class MainWindow(QMainWindow):
         self.search.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
         self.search.setAlignment(Qt.AlignmentFlag.AlignRight)
 
-        self.meeting_no_filter = QLineEdit()
-        self.meeting_no_filter.setPlaceholderText("مثلاً 10")
-        self.meeting_no_filter.setClearButtonEnabled(True)
-        self.meeting_no_filter.setFixedWidth(140)
+        self.meeting_no_filter = QComboBox()
+        self.meeting_no_filter.setEditable(True)  # تایپ برای جستجو داخل لیست
+        self.meeting_no_filter.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.meeting_no_filter.setFixedWidth(200)
         self.meeting_no_filter.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
-        self.meeting_no_filter.setAlignment(Qt.AlignmentFlag.AlignLeft)
         self.meeting_no_filter.setToolTip(
-            "فیلتر شماره صورتجلسه: هر عبارتی که داخل شماره باشد (مثال: 10 → 10، 100، A-10-B)"
+            "یک شماره صورتجلسه را از لیست انتخاب کنید؛ سپس گزارش همان پرونده نمایش داده می‌شود."
         )
+        self.meeting_no_filter.setMaxVisibleItems(20)
+        # فقط انتخاب از لیست (نه متن آزاد خارج از لیست)
+        le = self.meeting_no_filter.lineEdit()
+        if le:
+            le.setPlaceholderText("انتخاب شماره صورتجلسه…")
+            le.setAlignment(Qt.AlignmentFlag.AlignLeft)
 
         self.btn_meeting_no_report = QPushButton("📄 گزارش شماره")
         self.btn_meeting_no_report.setObjectName("btn_primary")
         self.btn_meeting_no_report.setToolTip(
-            "جستجوی شماره صورتجلسه (حاوی) و تولید گزارش HTML — محل کار | روز مانده | موضوع | پیمانکار"
+            "گزارش HTML برای صورتجلسه انتخاب‌شده (محل کار | روز مانده | موضوع | پیمانکار)"
         )
 
         bar.addWidget(QLabel("شماره صورتجلسه:"))
@@ -869,9 +874,17 @@ class MainWindow(QMainWindow):
         self.view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.view.customContextMenuRequested.connect(self._show_table_context_menu)
 
+        # اسکرول افقی نرم و قابل‌اعتماد (بدون کش آمدن اجباری آخرین ستون)
+        self.view.setHorizontalScrollMode(QTableView.ScrollMode.ScrollPerPixel)
+        self.view.setVerticalScrollMode(QTableView.ScrollMode.ScrollPerPixel)
+        self.view.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.view.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+
         hdr = self.view.horizontalHeader()
         hdr.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
-        hdr.setStretchLastSection(True)
+        hdr.setStretchLastSection(False)  # اسکرول افقی واقعی به‌جای فشردن ستون‌ها
+        hdr.setMinimumSectionSize(56)
+        hdr.setDefaultSectionSize(110)
         hdr.setSortIndicatorShown(True)
         hdr.setDefaultAlignment(Qt.AlignmentFlag.AlignCenter)
         hdr.sectionClicked.connect(self._on_header_clicked)
@@ -886,8 +899,10 @@ class MainWindow(QMainWindow):
 
     def _connect_signals(self) -> None:
         self.search.textChanged.connect(self.search_timer.start)
-        self.meeting_no_filter.returnPressed.connect(self._report_by_meeting_number)
         self.btn_meeting_no_report.clicked.connect(self._report_by_meeting_number)
+        # Enter در خط‌ویرایش کمبو
+        if self.meeting_no_filter.lineEdit():
+            self.meeting_no_filter.lineEdit().returnPressed.connect(self._report_by_meeting_number)
         for cb in (self.status_filter, self.priority_filter, self.employer_filter,
                    self.contractor_filter, self.discipline_filter):
             cb.currentTextChanged.connect(self._on_filters_changed)
@@ -1225,12 +1240,13 @@ class MainWindow(QMainWindow):
         h = self.view.horizontalHeader()
         for c in range(self.model.columnCount()):
             ht = self.model.headerData(c, Qt.Orientation.Horizontal) or ""
-            mw = len(ht) * 11
-            for r in range(min(self.model.rowCount(), 60)):
+            width = max(len(str(ht)) * 10, 56)
+            for r in range(min(self.model.rowCount(), 40)):
                 t = self.model.data(self.model.index(r, c), Qt.ItemDataRole.DisplayRole) or ""
-                mw = max(mw, len(str(t)) * 8)
-            h.resizeSection(c, min(mw + 24, 320))
-        h.setStretchLastSection(True)
+                width = max(width, min(len(str(t)) * 8, 280))
+            # سقف معقول تا اسکرول افقی ممکن بماند
+            h.resizeSection(c, min(width + 20, 260))
+        h.setStretchLastSection(False)
         self._columns_initialized = True
 
     def _get_filters(self) -> Dict[str, str]:
@@ -1252,36 +1268,37 @@ class MainWindow(QMainWindow):
         self.reload_page()
 
     def _report_by_meeting_number(self) -> None:
-        """فیلتر حاوی روی شماره صورتجلسه + گزارش HTML."""
-        q = (self.meeting_no_filter.text() or "").strip()
-        if not q:
+        """گزارش HTML برای یک صورتجلسه انتخاب‌شده از کمبوباکس."""
+        q = (self.meeting_no_filter.currentText() or "").strip()
+        if not q or q == "— انتخاب —":
             QMessageBox.information(
                 self,
-                "فیلتر شماره",
-                "عبارت فیلتر شماره صورتجلسه را وارد کنید.\nمثال: 10",
+                "انتخاب صورتجلسه",
+                "لطفاً یک شماره صورتجلسه را از لیست انتخاب کنید.",
             )
             self.meeting_no_filter.setFocus()
             return
         try:
-            meetings = self.db.search_by_meeting_number_contains(q, limit=500)
+            meeting = self.db.get_meeting_by_number(q)
         except Exception as exc:
-            logger.exception("meeting number search failed")
+            logger.exception("meeting number lookup failed")
             QMessageBox.critical(self, "خطا", f"جستجو ناموفق بود:\n{exc}")
             return
-        if not meetings:
+        if not meeting:
             QMessageBox.information(
                 self,
-                "نتیجه‌ای نیست",
-                f"هیچ صورتجلسه‌ای که شماره آن حاوی «{q}» باشد یافت نشد.",
+                "یافت نشد",
+                f"صورتجلسه‌ای با شماره «{q}» در سیستم ثبت نشده است.\n"
+                "فقط موارد داخل لیست معتبر هستند.",
             )
             return
-        self.search.setText(q)
         try:
-            gen = MeetingNumberReportGenerator(meetings, q, parent=self)
+            gen = MeetingNumberReportGenerator([meeting], q, parent=self)
             gen.generate_and_open()
         except Exception as e:
             logger.exception("meeting number report failed")
             QMessageBox.critical(self, "خطا", f"تولید گزارش ناموفق بود:\n{e}")
+
 
     def reload_meta(self) -> None:
         def _fill(cb: QComboBox, vals: List[str]) -> None:
@@ -1302,7 +1319,37 @@ class MainWindow(QMainWindow):
             self.discipline_filter,
             list(dict.fromkeys(DISCIPLINES + self.db.distinct_values("discipline"))),
         )
+        # لیست شماره‌های صورتجلسه برای گزارش تک‌پرونده
+        self._reload_meeting_number_combo()
         self._update_stats()
+
+    def _reload_meeting_number_combo(self) -> None:
+        """پر کردن کمبوباکس شماره صورتجلسه (فقط انتخاب از لیست)."""
+        cb = getattr(self, "meeting_no_filter", None)
+        if cb is None:
+            return
+        cur = cb.currentText().strip()
+        cb.blockSignals(True)
+        cb.clear()
+        cb.addItem("— انتخاب —")
+        try:
+            nums = self.db.distinct_values("meeting_number", limit=10000)
+        except Exception as exc:
+            logger.warning("load meeting numbers failed: %s", exc)
+            nums = []
+        # مرتب‌سازی طبیعی‌تر: همان ترتیب distinct (معمولاً الفبایی)
+        cb.addItems(nums)
+        # Completer برای جستجوی سریع داخل لیست
+        from PyQt6.QtCore import Qt as _Qt
+        from PyQt6.QtWidgets import QCompleter
+        completer = QCompleter(nums, cb)
+        completer.setCaseSensitivity(_Qt.CaseSensitivity.CaseInsensitive)
+        completer.setFilterMode(_Qt.MatchFlag.MatchContains)
+        completer.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
+        cb.setCompleter(completer)
+        i = cb.findText(cur)
+        cb.setCurrentIndex(i if i >= 0 else 0)
+        cb.blockSignals(False)
 
     def _query_page(self) -> Tuple[List[Meeting], int]:
         return self.db.query_meetings_page(
