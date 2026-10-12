@@ -87,5 +87,12 @@ def test_workflow_initialized_on_create(tmp_db):
     steps = tmp_db.get_workflow_steps(m.id)
     assert len(steps) == 6
     names = [s.step_name for s in steps]
-    assert "دریافت در دفتر کارفرما" in names or "ورود به دفتر کارفرما" in names
-    assert steps[0].step_order == 1
+    assert names == [
+        "۱. ثبت و دریافت صورتجلسه در دفتر کارفرما",
+        "۲. ارجاع پرونده به رئیس دفتر فنی",
+        "۳. بررسی فنی و ثبت نظر کارشناس",
+        "۴. کنترل و تأیید رئیس دفتر فنی",
+        "۵. تأیید نهایی مدیر سایت",
+        "۶. ابلاغ رسمی به پیمانکار و بستن پرونده",
+    ]
+    assert [step.step_order for step in steps] == [1, 2, 3, 4, 5, 6]
