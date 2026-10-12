@@ -919,7 +919,9 @@ def get_stylesheet(dark_mode: bool = False) -> str:
     Args:
         dark_mode: در صورت True استایل تاریک، در غیر این صورت روشن بازگردانده می‌شود.
     """
-    base = DARK_STYLE if dark_mode else LIGHT_STYLE\n    polish = FORM_POLISH_DARK if dark_mode else FORM_POLISH_LIGHT\n    return base + polish
+    base = DARK_STYLE if dark_mode else LIGHT_STYLE
+    polish = FORM_POLISH_DARK if dark_mode else FORM_POLISH_LIGHT
+    return base + polish
 
 
 def apply_theme(target: Union[QApplication, QWidget], dark_mode: bool = False) -> None:
