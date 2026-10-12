@@ -11,6 +11,9 @@ a = Analysis(
     datas=[('app.ico', '.')],
     hiddenimports=[
         'sqlalchemy.dialects.sqlite',
+        'sqlalchemy.dialects.postgresql',
+        'psycopg',
+        'psycopg.pq',
         'jdatetime',
         'openpyxl',
         'pandas',
