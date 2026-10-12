@@ -2,9 +2,13 @@
 """
 ui.main_window
 پنجره اصلی برنامه Document & MOM Tracking System
-نسخه نهایی هوشمند: رصد خودکار وضعیت از گردش کار، رفع تمام باگ‌های RTL،
-دکمه‌های مدرن SaaS و همگام‌سازی کامل با قانون جدید (ارسال به پیمانکار = اتمام کار)
-(اصلاح نمایش نام کارشناس واقعی دپارتمان در اسناد ابلاغ شده)
+نسخه ۳.۱: تحلیل‌شده و اصلاح‌شده
+- ادغام رنگ‌ها در ثابت‌های ماژول (theme constants)
+- تراکنش اتمیک در همگام‌سازی سراسری
+- بسته‌شدن هدفمند گام‌ها بر اساس قانون طلایی ابلاغ به پیمانکار
+- تخمین عرض ستون با QFontMetrics برای متون فارسی
+- حذف کد مرده و importهای بی‌استفاده
+- هشدارهای غیرمزاحم در StatusBar
 """
 from __future__ import annotations
 
@@ -78,10 +82,10 @@ from security.permissions import (
 )
 from security.session import UserSession
 from utils.date_utils import to_gregorian, to_shamsi, today_shamsi
-from services.meeting_number_report import MeetingNumberReportGenerator
 from services.workflow_status import derive_workflow_state
 
 logger = logging.getLogger(__name__)
+
 
 def _has_matplotlib() -> bool:
     try:
@@ -92,13 +96,15 @@ def _has_matplotlib() -> bool:
 
 
 # ─────────────────────────────────────────────
-# ثابت‌های UI
+# ثابت‌های سراسری UI
 # ─────────────────────────────────────────────
 COLOR_SKY_BLUE = "#00BFFF"
 COLOR_SKY_DARK = "#0099CC"
 COLOR_SELECTION_BG = "#E0F7FA"
 COLOR_SELECTION_FG = "#004D40"
 COLOR_TEXT_MAIN = "#1E293B"
+
+FILTER_ALL_LABEL = "همه"
 
 # ─────────────────────────────────────────────
 # وضعیت‌ها و اولویت‌ها
@@ -150,6 +156,41 @@ HEADER_TO_DB_COL: Dict[str, str] = {
     "تاریخ ارسال به پیمانکار": "sent_to_contractor_date",
     "تاریخ پاسخ پیمانکار": "contractor_response_date",
 }
+
+# ─────────────────────────────────────────────
+# پالت رنگ مرکزی (theme) — تنها منبع حقیقت برای رنگ‌های وضعیت
+# ─────────────────────────────────────────────
+WORKFLOW_STATE_COLORS: Dict[str, Tuple[str, str]] = {
+    "completed":   ("#DCFCE7", "#166534"),
+    "in_progress": ("#DBEAFE", "#1D4ED8"),
+    "pending":     ("#FEF3C7", "#92400E"),
+    "returned":    ("#FEE2E2", "#991B1B"),
+    "cancelled":   ("#F3F4F6", "#4B5563"),
+    "unknown":     ("#F3F4F6", "#374151"),
+}
+
+STATUS_BG_COLORS: Dict[str, str] = {
+    STATUS_COMPLETED: "#DCFCE7",
+    STATUS_PENDING:   "#FEF3C7",
+    STATUS_AWAITING:  "#E0F2FE",
+    STATUS_CANCELLED: "#FEE2E2",
+    STATUS_RETURNED:  "#FFEDD5",
+}
+
+OVERDUE_BG, OVERDUE_FG = "#FEE2E2", "#991B1B"
+WARNING_BG, WARNING_FG = "#FEF3C7", "#92400E"
+WARNING_DAYS = 3
+DEFAULT_FG = "#1E293B"
+SELECTION_ROW_BG = "#BAE6FD"
+SELECTION_ROW_FG = "#0C4A6E"
+
+LEGEND_ITEMS: List[Tuple[str, str, str]] = [
+    ("در حال انجام",       "#DBEAFE", "#1D4ED8"),
+    ("در انتظار",          "#FEF3C7", "#92400E"),
+    ("برگشت برای اصلاح",   "#FFE4E6", "#9F1239"),
+    ("تکمیل و ابلاغ‌شده",   "#D1FAE5", "#166534"),
+    ("لغوشده / نامشخص",    "#F3F4F6", "#4B5563"),
+]
 
 
 @lru_cache(maxsize=4096)
@@ -278,28 +319,6 @@ class MeteorButton(QPushButton):
 class MeetingsPageModel(QAbstractTableModel):
     """مدل جدول نمایش اطلاعات با رنگ‌بندی داینامیک وضعیت‌ها."""
 
-    _BG: Dict[str, QColor] = {
-        STATUS_COMPLETED: QColor("#DCFCE7"),
-        STATUS_PENDING:   QColor("#FEF3C7"),
-        STATUS_AWAITING:  QColor("#E0F2FE"),
-        STATUS_CANCELLED: QColor("#FEE2E2"),
-        STATUS_RETURNED:  QColor("#FFEDD5"),
-    }
-    _FG: Dict[str, QColor] = {
-        STATUS_COMPLETED: QColor("#166534"),
-        STATUS_PENDING:   QColor("#92400E"),
-        STATUS_AWAITING:  QColor("#1E40AF"),
-        STATUS_CANCELLED: QColor("#991B1B"),
-        STATUS_RETURNED:  QColor("#9A3412"),
-    }
-
-    _OVERDUE_BG = QColor("#FEE2E2")
-    _OVERDUE_FG = QColor("#991B1B")
-    _WARNING_BG = QColor("#FEF3C7")
-    _WARNING_FG = QColor("#92400E")
-    _WARNING_DAYS = 3
-    _DEFAULT_FG = QColor("#1E293B")
-
     def __init__(self) -> None:
         super().__init__()
         self._orig_headers: List[str] = Meeting.headers()
@@ -315,7 +334,7 @@ class MeetingsPageModel(QAbstractTableModel):
         self._col_meeting_number = self._find("شماره صورتجلسه")
         self._col_drawing_number = self._find("شماره نقشه")
         self._col_contract_number = self._find("شماره قرارداد")
-        
+
         self._col_responsible = len(self._orig_headers)
         self._col_stage = len(self._orig_headers) + 1
 
@@ -363,7 +382,7 @@ class MeetingsPageModel(QAbstractTableModel):
             if val == "admin":
                 return "مدیر سیستم (admin)"
             return str(val or "—")
-            
+
         if col == self._col_stage + 1:
             return str(self._cell(row, self._col_stage) or "—")
 
@@ -402,31 +421,25 @@ class MeetingsPageModel(QAbstractTableModel):
     def _color(self, row: int, role: int) -> Optional[QBrush]:
         is_bg = role == Qt.ItemDataRole.BackgroundRole
 
-        # رنگ ردیف از وضعیت واقعی گام‌ها می‌آید؛ تاریخ ابلاغ به‌تنهایی سبز نمی‌شود.
+        # ۱. رنگ ردیف از وضعیت واقعی گام‌ها (اولویت اول)
         meeting_id = self.get_row_id(row)
         workflow_state = self.workflow_states.get(meeting_id) if meeting_id is not None else None
-        workflow_colors = {
-            "completed": (QColor("#DCFCE7"), QColor("#166534")),
-            "in_progress": (QColor("#DBEAFE"), QColor("#1D4ED8")),
-            "pending": (QColor("#FEF3C7"), QColor("#92400E")),
-            "returned": (QColor("#FEE2E2"), QColor("#991B1B")),
-            "cancelled": (QColor("#F3F4F6"), QColor("#4B5563")),
-            "unknown": (QColor("#F3F4F6"), QColor("#374151")),
-        }
-        colors = workflow_colors.get(workflow_state or "")
+        colors = WORKFLOW_STATE_COLORS.get(workflow_state or "")
         if colors:
-            # هر دو رنگ تعریف‌شده واقعاً مصرف شوند: پس‌زمینه و متن متناسب با وضعیت.
-            return QBrush(colors[0] if is_bg else colors[1])
+            return QBrush(QColor(colors[0] if is_bg else colors[1]))
 
+        # ۲. رنگ از وضعیت ذخیره‌شده در DB
         if self._col_status >= 0:
             v = self._cell(row, self._col_status)
             status = str(v).strip() if v else None
             if status:
-                # وضعیت، پس‌زمینه را رنگی می‌کند؛ متن خنثی می‌ماند تا خوانا باشد.
-                color = self._BG.get(status) if is_bg else self._DEFAULT_FG
-                if color:
-                    return QBrush(color)
+                bg = STATUS_BG_COLORS.get(status) if is_bg else None
+                if bg:
+                    return QBrush(QColor(bg))
+                if not is_bg:
+                    return QBrush(QColor(DEFAULT_FG))
 
+        # ۳. هشدار سررسید
         if self._col_due >= 0:
             v = self._cell(row, self._col_due)
             due_str = str(v).strip() if v else None
@@ -434,12 +447,12 @@ class MeetingsPageModel(QAbstractTableModel):
                 days = _cached_days_until(due_str)
                 if days is not None:
                     if days < 0:
-                        return QBrush(self._OVERDUE_BG if is_bg else self._OVERDUE_FG)
-                    if days <= self._WARNING_DAYS:
-                        return QBrush(self._WARNING_BG if is_bg else self._WARNING_FG)
+                        return QBrush(QColor(OVERDUE_BG if is_bg else OVERDUE_FG))
+                    if days <= WARNING_DAYS:
+                        return QBrush(QColor(WARNING_BG if is_bg else WARNING_FG))
 
         if not is_bg:
-            return QBrush(self._DEFAULT_FG)
+            return QBrush(QColor(DEFAULT_FG))
         return None
 
     def get_row_id(self, row: int) -> Optional[int]:
@@ -470,24 +483,25 @@ class StatusRowDelegate(QStyledItemDelegate):
         # پس‌زمینه را خود delegate رسم می‌کند تا استایل عمومی برنامه نتواند
         # رنگ وضعیت را با رنگ سفید/هاور جایگزین کند.
         painter.save()
-        painter.fillRect(opt.rect, QColor("#BAE6FD") if selected else bg_color)
+        painter.fillRect(opt.rect, QColor(SELECTION_ROW_BG) if selected else bg_color)
         painter.restore()
 
-        # جلوگیری از نقاشی دوباره پس‌زمینه توسط QStyle؛ متن و آیکون‌ها
-        # همچنان با موتور استاندارد Qt و تنظیمات مدل رسم می‌شوند.
+        # جلوگیری از نقاشی دوباره پس‌زمینه توسط QStyle
         opt.backgroundBrush = QBrush()
         opt.state &= ~QStyle.StateFlag.State_Selected
         opt.state &= ~QStyle.StateFlag.State_MouseOver
-        opt.palette.setColor(
-            QPalette.ColorRole.Text,
-            QColor("#0C4A6E") if selected else (
-                index.data(Qt.ItemDataRole.ForegroundRole).color()
-                if isinstance(index.data(Qt.ItemDataRole.ForegroundRole), QBrush)
-                else QColor("#1E293B")
-            ),
-        )
-        opt.palette.setColor(QPalette.ColorRole.Highlight, QColor("#BAE6FD"))
-        opt.palette.setColor(QPalette.ColorRole.HighlightedText, QColor("#0C4A6E"))
+
+        fg_data = index.data(Qt.ItemDataRole.ForegroundRole)
+        if selected:
+            fg = QColor(SELECTION_ROW_FG)
+        elif isinstance(fg_data, QBrush):
+            fg = fg_data.color()
+        else:
+            fg = QColor(DEFAULT_FG)
+
+        opt.palette.setColor(QPalette.ColorRole.Text, fg)
+        opt.palette.setColor(QPalette.ColorRole.Highlight, QColor(SELECTION_ROW_BG))
+        opt.palette.setColor(QPalette.ColorRole.HighlightedText, QColor(SELECTION_ROW_FG))
         style = opt.widget.style() if opt.widget is not None else QApplication.style()
         style.drawControl(QStyle.ControlElement.CE_ItemViewItem, opt, painter, opt.widget)
 
@@ -647,6 +661,7 @@ class MainWindow(QMainWindow):
             p = str(getattr(self.db, "db_path", "") or "")
             return bool(p) and os.path.isfile(p)
         except Exception:
+            logger.debug("DB path check failed", exc_info=True)
             return False
 
     def _tick_db_led(self) -> None:
@@ -716,20 +731,32 @@ class MainWindow(QMainWindow):
             if f and os.path.isdir(f):
                 QDesktopServices.openUrl(QUrl.fromLocalFile(f))
         except Exception:
-            logger.exception("Cannot open DB folder")
+            logger.debug("Cannot open DB folder", exc_info=True)
 
     def _show_operational_alerts(self) -> None:
+        """
+        نمایش هشدارهای عملیاتی به شکل غیرمزاحم:
+        - برای تأخیرهای بحرانی (بیش از ۵ مورد): یک MessageBox اطلاع‌رسانی می‌شود.
+        - در غیر این صورت: پیام در نوار وضعیت به مدت ۱۰ ثانیه نمایش داده می‌شود.
+        """
         try:
             m = self.db.operational_metrics()
-            if m.get("overdue", 0) > 0:
+            overdue = int(m.get("overdue", 0) or 0)
+            due_3 = int(m.get("due_3", 0) or 0)
+
+            if overdue >= 5:
                 QMessageBox.warning(
-                    self, "⚠️ هشدار پیگیری",
-                    f"{m['overdue']} صورتجلسه از مهلت انجام عبور کرده است.\n\n"
+                    self, "⚠️ هشدار پیگیری بحرانی",
+                    f"{overdue} صورتجلسه از مهلت انجام عبور کرده است.\n\n"
                     "از «داشبورد عملیاتی MOM» برای پیگیری استفاده کنید."
                 )
-            elif m.get("due_3", 0) > 0:
+            elif overdue > 0:
                 self.statusBar().showMessage(
-                    f"⏳ هشدار: {m['due_3']} صورتجلسه در ۳ روز آینده سررسید می‌شود.", 10000
+                    f"⚠️ {overdue} صورتجلسه از مهلت انجام عبور کرده است.", 10000
+                )
+            elif due_3 > 0:
+                self.statusBar().showMessage(
+                    f"⏳ {due_3} صورتجلسه در ۳ روز آینده سررسید می‌شود.", 10000
                 )
         except Exception:
             logger.exception("Operational alert failed")
@@ -790,7 +817,7 @@ class MainWindow(QMainWindow):
             background: transparent;
         """)
 
-        info_label = QLabel("پایش مداوم اسناد کارگاهی | نسخه ۳.۰")
+        info_label = QLabel("پایش مداوم اسناد کارگاهی | نسخه ۳.۱")
         info_label.setStyleSheet("""
             color: rgba(255, 255, 255, 0.95);
             font-size: 11px;
@@ -880,7 +907,7 @@ class MainWindow(QMainWindow):
         self.btn_prev.setObjectName("btn_pager")
         self.btn_next = QPushButton("بعدی ◀")
         self.btn_next.setObjectName("btn_pager")
-        
+
         self.lbl_page = QLabel()
         self.lbl_page.setObjectName("lbl_page")
 
@@ -912,31 +939,6 @@ class MainWindow(QMainWindow):
         self.search.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
         self.search.setAlignment(Qt.AlignmentFlag.AlignRight)
 
-        self.meeting_no_filter = QComboBox()
-        self.meeting_no_filter.setEditable(True)  # تایپ برای جستجو داخل لیست
-        self.meeting_no_filter.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
-        self.meeting_no_filter.setFixedWidth(200)
-        self.meeting_no_filter.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
-        self.meeting_no_filter.setToolTip(
-            "یک شماره صورتجلسه را از لیست انتخاب کنید؛ سپس گزارش همان پرونده نمایش داده می‌شود."
-        )
-        self.meeting_no_filter.setMaxVisibleItems(20)
-        # فقط انتخاب از لیست (نه متن آزاد خارج از لیست)
-        le = self.meeting_no_filter.lineEdit()
-        if le:
-            le.setPlaceholderText("انتخاب شماره صورتجلسه…")
-            le.setAlignment(Qt.AlignmentFlag.AlignLeft)
-
-        self.btn_meeting_no_report = QPushButton("📄 گزارش شماره")
-        self.btn_meeting_no_report.setObjectName("btn_primary")
-        self.btn_meeting_no_report.setToolTip(
-            "گزارش HTML برای صورتجلسه انتخاب‌شده (محل کار | روز مانده | موضوع | پیمانکار)"
-        )
-
-        bar.addWidget(QLabel("شماره صورتجلسه:"))
-        bar.addWidget(self.meeting_no_filter)
-        bar.addWidget(self.btn_meeting_no_report)
-        bar.addSpacing(12)
         bar.addWidget(QLabel("جستجوی سریع:"))
         bar.addWidget(self.search, stretch=1)
         return bar
@@ -953,14 +955,7 @@ class MainWindow(QMainWindow):
         title.setObjectName("legend_title")
         layout.addWidget(title)
 
-        items = [
-            ("در حال انجام", "#DBEAFE", "#1D4ED8"),
-            ("در انتظار", "#FEF3C7", "#92400E"),
-            ("برگشت برای اصلاح", "#FFE4E6", "#9F1239"),
-            ("تکمیل و ابلاغ‌شده", "#D1FAE5", "#166534"),
-            ("لغوشده / نامشخص", "#F3F4F6", "#4B5563"),
-        ]
-        for label, bg, fg in items:
+        for label, bg, fg in LEGEND_ITEMS:
             chip = QLabel(f"●  {label}")
             chip.setObjectName("status_legend_item")
             chip.setStyleSheet(
@@ -987,7 +982,7 @@ class MainWindow(QMainWindow):
         self.view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.view.customContextMenuRequested.connect(self._show_table_context_menu)
 
-        # اسکرول افقی نرم و قابل‌اعتماد (بدون کش آمدن اجباری آخرین ستون)
+        # اسکرول افقی نرم و قابل‌اعتماد
         self.view.setHorizontalScrollMode(QTableView.ScrollMode.ScrollPerPixel)
         self.view.setVerticalScrollMode(QTableView.ScrollMode.ScrollPerPixel)
         self.view.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
@@ -995,7 +990,7 @@ class MainWindow(QMainWindow):
 
         hdr = self.view.horizontalHeader()
         hdr.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
-        hdr.setStretchLastSection(False)  # اسکرول افقی واقعی به‌جای فشردن ستون‌ها
+        hdr.setStretchLastSection(False)
         hdr.setMinimumSectionSize(56)
         hdr.setDefaultSectionSize(110)
         hdr.setSortIndicatorShown(True)
@@ -1013,10 +1008,6 @@ class MainWindow(QMainWindow):
 
     def _connect_signals(self) -> None:
         self.search.textChanged.connect(self.search_timer.start)
-        self.btn_meeting_no_report.clicked.connect(self._report_by_meeting_number)
-        # Enter در خط‌ویرایش کمبو
-        if self.meeting_no_filter.lineEdit():
-            self.meeting_no_filter.lineEdit().returnPressed.connect(self._report_by_meeting_number)
         for cb in (self.status_filter, self.priority_filter, self.employer_filter,
                    self.contractor_filter, self.discipline_filter):
             cb.currentTextChanged.connect(self._on_filters_changed)
@@ -1090,7 +1081,7 @@ class MainWindow(QMainWindow):
         return a
 
     # ─────────────────────────────────────────
-    # اعمال استایل هماهنگ منوها، دکمه‌ها و بدنه
+    # اعمال استایل
     # ─────────────────────────────────────────
     def _apply_style(self) -> None:
         if self.dark_mode:
@@ -1098,14 +1089,14 @@ class MainWindow(QMainWindow):
             bg_h, fg_m, fg_h = "#1E293B", "#E2E8F0", "#F1F5F9"
             brd, inp, sbb = "#475569", "#1E293B", "#1E293B"
             bd, sf = "#64748B", COLOR_SKY_BLUE
-            tf, sb, sfg = "#E2E8F0", "#0369A1", "#FFFFFF"
+            tf = "#E2E8F0"
             focus_bg = "#263F4D"
             secondary_bg, secondary_hover, secondary_pressed = "#334155", "#475569", "#64748B"
             secondary_fg, secondary_hover_fg = "#E2E8F0", "#FFFFFF"
             danger_bg, danger_border, danger_fg = "#7F1D1D", "#B91C1C", "#FEE2E2"
             pager_bg, pager_fg, pager_hover = "#1E293B", "#E2E8F0", "#334155"
             selection_bg, selection_fg = "#075985", "#F0F9FF"
-            
+
             menu_style = """
                 QMenuBar { background-color: #1E293B; color: #E2E8F0; border-bottom: 1px solid #334155; font-size: 12px; }
                 QMenuBar::item { background: transparent; padding: 5px 12px; color: #E2E8F0; }
@@ -1119,14 +1110,14 @@ class MainWindow(QMainWindow):
             bg_h, fg_m, fg_h = "#E2E8F0", "#0F172A", "#0F172A"
             brd, inp, sbb = "#CBD5E1", "#FFFFFF", "#FFFFFF"
             bd, sf = "#94A3B8", "#0284C7"
-            tf, sb, sfg = "#1E293B", COLOR_SELECTION_BG, COLOR_SELECTION_FG
+            tf = "#1E293B"
             focus_bg = "#F0FDFA"
             secondary_bg, secondary_hover, secondary_pressed = "#FFFFFF", "#F1F5F9", "#E2E8F0"
             secondary_fg, secondary_hover_fg = "#334155", "#0F172A"
             danger_bg, danger_border, danger_fg = "#FEE2E2", "#FCA5A5", "#991B1B"
             pager_bg, pager_fg, pager_hover = "#FFFFFF", "#334155", "#F1F5F9"
             selection_bg, selection_fg = "#BAE6FD", "#0C4A6E"
-            
+
             menu_style = """
                 QMenuBar { background-color: #FFFFFF; color: #1E293B; border-bottom: 1px solid #E2E8F0; font-size: 12px; }
                 QMenuBar::item { background: transparent; padding: 5px 12px; color: #1E293B; }
@@ -1188,7 +1179,7 @@ class MainWindow(QMainWindow):
                 background: {focus_bg};
             }}
             QLabel {{ color:{fg_m}; font-size:12.5px; }}
-            
+
             QPushButton {{
                 font-size: 12px;
                 font-weight: bold;
@@ -1260,7 +1251,9 @@ class MainWindow(QMainWindow):
     # ─────────────────────────────────────────
     def _compute_live_status(self, meeting_id: int) -> str:
         """
-        محاسبه خودکار وضعیت کلی صورتجلسه بر اساس گام‌های گردش کار و پاسخ پیمانکار.
+        محاسبه وضعیت زنده از روی شناسه پرونده (کوئری کامل).
+        این متد نقطه‌ی ورودی امن برای استفاده‌های تک‌پرونده‌ای است
+        (مثل `_apply_live_status`) که لیست گام‌ها را از قبل در دست ندارد.
         """
         try:
             with self.db.session() as sess:
@@ -1271,81 +1264,109 @@ class MainWindow(QMainWindow):
                 if meeting.status == STATUS_CANCELLED:
                     return STATUS_CANCELLED
 
-                steps = sess.query(WorkflowStep).filter(
-                    WorkflowStep.meeting_id == meeting_id
-                ).order_by(WorkflowStep.step_order.asc()).all()
-
+                steps = (
+                    sess.query(WorkflowStep)
+                    .filter(WorkflowStep.meeting_id == meeting_id)
+                    .order_by(WorkflowStep.step_order.asc())
+                    .all()
+                )
                 return self._compute_live_status_from_steps(meeting, steps)
-
         except Exception as exc:
-            logger.warning("Live status computation failed for meeting %s: %s", meeting_id, exc)
+            logger.warning(
+                "Live status computation failed for meeting %s: %s", meeting_id, exc
+            )
             return STATUS_PENDING
 
-    def _compute_live_status_from_steps(self, meeting: Meeting, steps: List[WorkflowStep]) -> str:
-        """محاسبه وضعیت از روی لیست لود شده گام‌ها (فوق‌سریع و بدون کوئری دیتابیس مجدد)"""
+    def _compute_live_status_from_steps(
+        self, meeting: Meeting, steps: List[WorkflowStep]
+    ) -> str:
+        """
+        محاسبه وضعیت از روی لیست لود شده گام‌ها (سریع، بدون کوئری دیتابیس).
+
+        ترتیب اولویت قوانین:
+        1) لغو شده → همان لغو
+        2) ابلاغ به پیمانکار (قانون طلایی) → تکمیل شده
+        3) وجود گام rejected → بازگشت داده شده
+        4) همه گام‌ها completed/skipped → تکمیل شده
+        5) وجود گام in_progress → در انتظار تأیید
+        6) در غیر این صورت → در دست بررسی
+        """
         if meeting.status == STATUS_CANCELLED:
             return STATUS_CANCELLED
 
-        # 👑 قانون طلایی ارسال: به محض اینکه فیلد تاریخ ارسال پر شود -> کل کار تکمیل شده است!
+        # 👑 قانون طلایی: به محض پر شدن تاریخ ارسال به پیمانکار → کل کار تکمیل شده است
         if meeting.sent_to_contractor_date is not None:
             return STATUS_COMPLETED
 
         if not steps:
             return STATUS_PENDING
 
-        # ۱. اگر گام ریجکت شده (برگشت داده شده) وجود داشته باشد -> «بازگشت داده شده»
-        rejected_step = next(
-            (s for s in reversed(steps) if s.status == "rejected"), None
-        )
+        rejected_step = next((s for s in reversed(steps) if s.status == "rejected"), None)
         if rejected_step:
             return STATUS_RETURNED
 
-        # ۲. اگر همه مراحل تکمیل شده باشند -> «تکمیل شده»
         if all(s.status in ("completed", "skipped") for s in steps):
             return STATUS_COMPLETED
 
-        # ۳. اگر گام در حال جریانی وجود دارد -> «در انتظار تأیید»
-        in_progress = any(s.status == "in_progress" for s in steps)
-        if in_progress:
+        if any(s.status == "in_progress" for s in steps):
             return STATUS_AWAITING
 
-        # ۴. پیش‌فرض -> «در دست بررسی»
         return STATUS_PENDING
 
     def _apply_live_status(self, meeting_id: int) -> None:
-        """اعمال وضعیت زنده محاسبه شده بر روی رکورد پایگاه داده به همراه بسته شدن هوشمند گام‌ها."""
+        """
+        اعمال وضعیت زنده محاسبه‌شده روی رکورد پایگاه داده.
+        در صورت ابلاغ به پیمانکار (قانون طلایی)، گام‌های **پیش از ابلاغ** بسته می‌شوند.
+        گام‌هایی که conceptاً «پس از ابلاغ» هستند (پاسخ پیمانکار و مشابه) دست‌نخورده می‌مانند.
+        """
         new_status = self._compute_live_status(meeting_id)
         try:
             with self.db.session() as sess:
                 meeting = sess.get(Meeting, meeting_id)
-                if meeting:
-                    # الف) اگر وضعیت تکمیل شده باشد و تاریخ ارسال پر باشد، تمام مراحل گردش‌کار تکمیل و بسته می‌شوند
-                    if new_status == STATUS_COMPLETED and meeting.sent_to_contractor_date is not None:
-                        # 🎯 همگام‌سازی: تاریخ بسته شدن و تاریخ پاسخ پیمانکار هم زمان با تاریخ ارسال مقداردهی می‌شوند
-                        meeting.closing_date = meeting.sent_to_contractor_date
-                        meeting.contractor_response_date = meeting.sent_to_contractor_date
+                if not meeting:
+                    return
 
-                        steps = sess.query(WorkflowStep).filter(
-                            WorkflowStep.meeting_id == meeting_id,
-                            WorkflowStep.status != "completed"
-                        ).all()
-                        for s in steps:
+                if new_status == STATUS_COMPLETED and meeting.sent_to_contractor_date is not None:
+                    # همگام‌سازی: تاریخ بسته شدن و پاسخ پیمانکار با تاریخ ابلاغ
+                    meeting.closing_date = meeting.sent_to_contractor_date
+                    meeting.contractor_response_date = meeting.sent_to_contractor_date
+
+                    # شناسایی گام «ارسال به پیمانکار» (اگر وجود داشته باشد)
+                    contractor_step_order = None
+                    steps_all = (
+                        sess.query(WorkflowStep)
+                        .filter(WorkflowStep.meeting_id == meeting_id)
+                        .order_by(WorkflowStep.step_order.asc())
+                        .all()
+                    )
+                    for s in steps_all:
+                        name = (s.step_name or "")
+                        if "پیمانکار" in name and ("ارسال" in name or "ابلاغ" in name):
+                            contractor_step_order = s.step_order
+                            break
+
+                    # فقط گام‌های قبل یا هم‌تراز با ابلاغ بسته می‌شوند
+                    for s in steps_all:
+                        if s.status == "completed":
+                            continue
+                        if contractor_step_order is None or s.step_order <= contractor_step_order:
                             s.status = "completed"
                             s.exit_date = meeting.sent_to_contractor_date
 
-                    if meeting.status != new_status:
-                        old_status = meeting.status
-                        meeting.status = new_status
-                        sess.commit()
-                        logger.info(
-                            "Live status updated for meeting %s: %s → %s",
-                            meeting_id, old_status, new_status
-                        )
+                if meeting.status != new_status:
+                    old_status = meeting.status
+                    meeting.status = new_status
+                    logger.info(
+                        "Live status updated for meeting %s: %s → %s",
+                        meeting_id, old_status, new_status,
+                    )
+
+                sess.commit()
         except Exception:
             logger.exception("Failed to persist live status for meeting %s", meeting_id)
 
     def sync_all_statuses(self) -> None:
-        """همگام‌سازی سراسری تمام رکوردهای قدیمی با منطق جدید گردش کار."""
+        """همگام‌سازی سراسری تمام رکوردهای فعال با منطق جدید گردش کار (اتمیک)."""
         reply = QMessageBox.question(
             self, "همگام‌سازی وضعیت‌ها",
             "آیا می‌خواهید وضعیت تمام صورتجلسات فعال با گردش کار همگام شود؟\n"
@@ -1357,16 +1378,54 @@ class MainWindow(QMainWindow):
 
         updated = 0
         try:
+            # ⚡ کل همگام‌سازی در یک تراکنش اتمیک انجام می‌شود.
             with self.db.session() as sess:
-                meetings = sess.query(Meeting).filter(
-                    Meeting.is_deleted.is_(False)
-                ).all()
+                meetings = (
+                    sess.query(Meeting)
+                    .filter(Meeting.is_deleted.is_(False))
+                    .all()
+                )
                 meeting_ids = [m.id for m in meetings]
 
-            for mid in meeting_ids:
-                # محاسبه و ثبت خودکار وضعیت تکمیل شده بر اساس قانون طلایی
-                self._apply_live_status(mid)
-                updated += 1
+                # بارگذاری گروهی گام‌ها (یک کوئری)
+                steps_by_meeting: Dict[int, List[WorkflowStep]] = {}
+                if meeting_ids:
+                    steps = (
+                        sess.query(WorkflowStep)
+                        .filter(WorkflowStep.meeting_id.in_(meeting_ids))
+                        .order_by(WorkflowStep.meeting_id, WorkflowStep.step_order.asc())
+                        .all()
+                    )
+                    for s in steps:
+                        steps_by_meeting.setdefault(s.meeting_id, []).append(s)
+
+                for m in meetings:
+                    m_steps = steps_by_meeting.get(m.id, [])
+                    new_status = self._compute_live_status_from_steps(m, m_steps)
+
+                    if new_status == STATUS_COMPLETED and m.sent_to_contractor_date is not None:
+                        m.closing_date = m.sent_to_contractor_date
+                        m.contractor_response_date = m.sent_to_contractor_date
+
+                        contractor_step_order = None
+                        for s in m_steps:
+                            name = (s.step_name or "")
+                            if "پیمانکار" in name and ("ارسال" in name or "ابلاغ" in name):
+                                contractor_step_order = s.step_order
+                                break
+
+                        for s in m_steps:
+                            if s.status == "completed":
+                                continue
+                            if contractor_step_order is None or s.step_order <= contractor_step_order:
+                                s.status = "completed"
+                                s.exit_date = m.sent_to_contractor_date
+
+                    if m.status != new_status:
+                        m.status = new_status
+                    updated += 1
+
+                sess.commit()
 
             QMessageBox.information(
                 self, "همگام‌سازی انجام شد",
@@ -1378,7 +1437,7 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "خطا", f"همگام‌سازی با خطا مواجه شد:\n{exc}")
 
     # ─────────────────────────────────────────
-    # سایر متدها و کنترل‌های برنامه
+    # سایر متدها
     # ─────────────────────────────────────────
     def _reset_column_sizes(self) -> None:
         h = self.view.horizontalHeader()
@@ -1388,17 +1447,35 @@ class MainWindow(QMainWindow):
         self._columns_initialized = False
 
     def _auto_size_columns(self) -> None:
+        """
+        تخمین دقیق عرض ستون‌ها با QFontMetrics (سازگار با فارسی و DPI).
+        """
         if self._columns_initialized:
             return
+
         h = self.view.horizontalHeader()
+        fm_body = QFontMetrics(self.view.font())
+        fm_header = QFontMetrics(h.font())
+
         for c in range(self.model.columnCount()):
-            ht = self.model.headerData(c, Qt.Orientation.Horizontal) or ""
-            width = max(len(str(ht)) * 10, 56)
-            for r in range(min(self.model.rowCount(), 40)):
-                t = self.model.data(self.model.index(r, c), Qt.ItemDataRole.DisplayRole) or ""
-                width = max(width, min(len(str(t)) * 8, 280))
-            # سقف معقول تا اسکرول افقی ممکن بماند
-            h.resizeSection(c, min(width + 20, 260))
+            header_text = str(
+                self.model.headerData(c, Qt.Orientation.Horizontal) or ""
+            )
+            # برای هدر یک مقدار پایه
+            width = fm_header.horizontalAdvance(header_text) + 24
+
+            # برای متن‌های بدنه
+            sample_limit = min(self.model.rowCount(), 40)
+            for r in range(sample_limit):
+                t = self.model.data(
+                    self.model.index(r, c), Qt.ItemDataRole.DisplayRole
+                )
+                if t:
+                    width = max(width, fm_body.horizontalAdvance(str(t)) + 22)
+
+            # محدوده معقول تا اسکرول افقی ممکن بماند
+            h.resizeSection(c, max(56, min(width, 280)))
+
         h.setStretchLastSection(False)
         self._columns_initialized = True
 
@@ -1412,7 +1489,7 @@ class MainWindow(QMainWindow):
             ("discipline", self.discipline_filter),
         ]:
             v = cb.currentText()
-            if v and v != "همه":
+            if v and v != FILTER_ALL_LABEL:
                 f[key] = v
         return f
 
@@ -1420,45 +1497,12 @@ class MainWindow(QMainWindow):
         self.page = 0
         self.reload_page()
 
-    def _report_by_meeting_number(self) -> None:
-        """گزارش HTML برای یک صورتجلسه انتخاب‌شده از کمبوباکس."""
-        q = (self.meeting_no_filter.currentText() or "").strip()
-        if not q or q == "— انتخاب —":
-            QMessageBox.information(
-                self,
-                "انتخاب صورتجلسه",
-                "لطفاً یک شماره صورتجلسه را از لیست انتخاب کنید.",
-            )
-            self.meeting_no_filter.setFocus()
-            return
-        try:
-            meeting = self.db.get_meeting_by_number(q)
-        except Exception as exc:
-            logger.exception("meeting number lookup failed")
-            QMessageBox.critical(self, "خطا", f"جستجو ناموفق بود:\n{exc}")
-            return
-        if not meeting:
-            QMessageBox.information(
-                self,
-                "یافت نشد",
-                f"صورتجلسه‌ای با شماره «{q}» در سیستم ثبت نشده است.\n"
-                "فقط موارد داخل لیست معتبر هستند.",
-            )
-            return
-        try:
-            gen = MeetingNumberReportGenerator([meeting], q, parent=self)
-            gen.generate_and_open()
-        except Exception as e:
-            logger.exception("meeting number report failed")
-            QMessageBox.critical(self, "خطا", f"تولید گزارش ناموفق بود:\n{e}")
-
-
     def reload_meta(self) -> None:
         def _fill(cb: QComboBox, vals: List[str]) -> None:
             cur = cb.currentText()
             cb.blockSignals(True)
             cb.clear()
-            cb.addItem("همه")
+            cb.addItem(FILTER_ALL_LABEL)
             cb.addItems([v for v in vals if v])
             i = cb.findText(cur)
             cb.setCurrentIndex(i if i >= 0 else 0)
@@ -1472,37 +1516,7 @@ class MainWindow(QMainWindow):
             self.discipline_filter,
             list(dict.fromkeys(DISCIPLINES + self.db.distinct_values("discipline"))),
         )
-        # لیست شماره‌های صورتجلسه برای گزارش تک‌پرونده
-        self._reload_meeting_number_combo()
         self._update_stats()
-
-    def _reload_meeting_number_combo(self) -> None:
-        """پر کردن کمبوباکس شماره صورتجلسه (فقط انتخاب از لیست)."""
-        cb = getattr(self, "meeting_no_filter", None)
-        if cb is None:
-            return
-        cur = cb.currentText().strip()
-        cb.blockSignals(True)
-        cb.clear()
-        cb.addItem("— انتخاب —")
-        try:
-            nums = self.db.distinct_values("meeting_number", limit=10000)
-        except Exception as exc:
-            logger.warning("load meeting numbers failed: %s", exc)
-            nums = []
-        # مرتب‌سازی طبیعی‌تر: همان ترتیب distinct (معمولاً الفبایی)
-        cb.addItems(nums)
-        # Completer برای جستجوی سریع داخل لیست
-        from PyQt6.QtCore import Qt as _Qt
-        from PyQt6.QtWidgets import QCompleter
-        completer = QCompleter(nums, cb)
-        completer.setCaseSensitivity(_Qt.CaseSensitivity.CaseInsensitive)
-        completer.setFilterMode(_Qt.MatchFlag.MatchContains)
-        completer.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
-        cb.setCompleter(completer)
-        i = cb.findText(cur)
-        cb.setCurrentIndex(i if i >= 0 else 0)
-        cb.blockSignals(False)
 
     def _query_page(self) -> Tuple[List[Meeting], int]:
         return self.db.query_meetings_page(
@@ -1548,15 +1562,18 @@ class MainWindow(QMainWindow):
             self.model.set_workflow_states(workflow_states)
             return result
 
-        # ⚡ لود دسته‌ای و بسیار بهینه گردش‌کار تمام سطرها تنها با ۱ کوئری در کل صفحه (سرعت فوق‌العاده بالا)
+        # ⚡ بارگذاری گروهی گردش‌کار تمام سطرها با یک کوئری
         meeting_ids = [m.id for m in meetings]
         workflow_map: Dict[int, List[WorkflowStep]] = {}
         workflow_loaded = True
         try:
             with self.db.session() as sess:
-                steps = sess.query(WorkflowStep).filter(
-                    WorkflowStep.meeting_id.in_(meeting_ids)
-                ).order_by(WorkflowStep.meeting_id, WorkflowStep.step_order.asc()).all()
+                steps = (
+                    sess.query(WorkflowStep)
+                    .filter(WorkflowStep.meeting_id.in_(meeting_ids))
+                    .order_by(WorkflowStep.meeting_id, WorkflowStep.step_order.asc())
+                    .all()
+                )
                 for s in steps:
                     workflow_map.setdefault(s.meeting_id, []).append(s)
         except Exception as exc:
@@ -1570,11 +1587,8 @@ class MainWindow(QMainWindow):
                 if row[i]:
                     row[i] = _cached_to_shamsi(str(row[i]))
 
-            # واکشی گام‌های این سطر مشخص از حافظه موقت
             m_steps = workflow_map.get(m.id, [])
 
-            # وضعیت از تابع مستقل استخراج می‌شود تا خطای واکشی DB
-            # به‌اشتباه به صورت «در انتظار بررسی» نشان داده نشود.
             workflow_states[m.id] = derive_workflow_state(
                 m.status,
                 (step.status for step in m_steps),
@@ -1582,12 +1596,10 @@ class MainWindow(QMainWindow):
                 workflow_loaded=workflow_loaded,
             )
 
-            # نمایش وضعیت زنده (محاسبه شده از گام‌های واکشی شده)
             if status_index >= 0:
                 live_status = self._compute_live_status_from_steps(m, m_steps)
                 row[status_index] = live_status
 
-            # نمایش کارشناس زنده و مرحله گردش‌کار جاری
             responsible, stage = self._resolve_workflow_step_from_list(m, m_steps)
             row.append(responsible or "—")
             row.append(stage or "—")
@@ -1596,26 +1608,25 @@ class MainWindow(QMainWindow):
         self.model.set_workflow_states(workflow_states)
         return result
 
-    def _resolve_workflow_step_from_list(self, meeting: Meeting, steps: List[WorkflowStep]) -> Tuple[str, str]:
-        """محاسبه سریع مرحله و کارشناس رسیدگی‌کننده فعال از روی لیست لود شده با رعایت قانون طلایی ارسال."""
-        # 🎯 اصلاح هوشمند: کارشناس رسیدگی‌کننده اصلی پروژه همیشه کارشناس تخصیص‌یافته در گام ۳ (ورود به دفتر کارشناس) است
-        # این کارشناس حتی پس از ابلاغ به پیمانکار نیز باید در صفحه اصلی نمایش داده شود
+    def _resolve_workflow_step_from_list(
+        self, meeting: Meeting, steps: List[WorkflowStep]
+    ) -> Tuple[str, str]:
+        """محاسبه سریع مرحله و کارشناس رسیدگی‌کننده فعال از لیست لود شده."""
+        # کارشناس اصلی: مسئول گام ۳ (ورود به دفتر کارشناس)
         specialist_step = next((s for s in steps if s.step_order == 3), None) if steps else None
         specialist_name = specialist_step.responsible_person if specialist_step else None
 
-        # حالت ۱: پرونده به پیمانکار ابلاغ شده است
+        # حالت ۱: پرونده ابلاغ شده
         if meeting.sent_to_contractor_date is not None:
-            responsible_display = specialist_name or "—"
-            return responsible_display, "گردش کار به اتمام رسیده (ابلاغ شده به پیمانکار)"
+            return specialist_name or "—", "گردش کار به اتمام رسیده (ابلاغ شده به پیمانکار)"
 
-        # حالت ۲: هیچ گامی هنوز ایجاد نشده است
+        # حالت ۲: گامی وجود ندارد
         if not steps:
             return specialist_name or "—", "—"
 
-        # پیدا کردن گام فعال فعلی (pending یا in_progress) برای نمایش در ستون مرحله جاری
+        # پیدا کردن گام فعال
         step = next(
-            (s for s in steps if s.status in ("pending", "in_progress")),
-            None
+            (s for s in steps if s.status in ("pending", "in_progress")), None
         )
         if not step:
             step = steps[-1]
@@ -1625,15 +1636,12 @@ class MainWindow(QMainWindow):
             "in_progress": "در حال انجام",
             "completed": "تکمیل شده",
             "skipped": "عبور شده",
-            "rejected": "برگشت داده شده"
+            "rejected": "برگشت داده شده",
         }
         status_fa = status_map.get(step.status, step.status)
-
-        # نمایش مسئول فعلی گام جاری در پرانتز برای وضوح بیشتر فرآیند
         current_resp = f" [{step.responsible_person}]" if step.responsible_person else ""
         stage_info = f"{step.step_name} ({status_fa}){current_resp}"
 
-        # اولویت نمایش کارشناس: کارشناس گام ۳ (اصلی) > مسئول گام فعال
         responsible = specialist_name or step.responsible_person or "—"
         return responsible, stage_info
 
@@ -1862,7 +1870,6 @@ class MainWindow(QMainWindow):
 
         from ui.meeting_dialog import MeetingDialog
         dlg = MeetingDialog(self.db, self)
-        from ui.meeting_dialog import MeetingDialog
         if dlg.exec() == MeetingDialog.DialogCode.Accepted:
             try:
                 m = self.db.create_meeting(dlg.get_data())
@@ -1876,7 +1883,6 @@ class MainWindow(QMainWindow):
                     f"number={m.meeting_number}",
                     meeting_id=m.id,
                 )
-                # اعمال وضعیت پیش‌فرض زنده
                 self._apply_live_status(m.id)
                 self.reload_meta()
                 self.reload_page()
@@ -1901,7 +1907,6 @@ class MainWindow(QMainWindow):
 
         from ui.meeting_dialog import MeetingDialog
         dlg = MeetingDialog(self.db, self, meeting=m)
-        from ui.meeting_dialog import MeetingDialog
         if dlg.exec() == MeetingDialog.DialogCode.Accepted:
             try:
                 self.db.update_meeting(m.id, dlg.get_data())
@@ -2015,7 +2020,6 @@ class MainWindow(QMainWindow):
 
         from ui.login_dialog import LoginDialog
         login = LoginDialog(new_db, self)
-        from ui.login_dialog import LoginDialog
         if login.exec() != LoginDialog.DialogCode.Accepted or not login.session:
             return
 
@@ -2073,7 +2077,7 @@ class MainWindow(QMainWindow):
             try:
                 os.system(f'attrib +R "{p}"')
             except Exception:
-                logger.exception("Set readonly failed")
+                logger.debug("Set readonly failed", exc_info=True)
 
         QMessageBox.information(self, "انتشار شد", f"ذخیره شد:\n{p}")
 
@@ -2109,7 +2113,7 @@ class MainWindow(QMainWindow):
                 self._import_progress.setValue(100)
                 self._import_progress.close()
             except Exception:
-                pass
+                logger.debug("Close import progress failed", exc_info=True)
             self._import_progress = None
 
         _cached_to_shamsi.cache_clear()
@@ -2168,7 +2172,7 @@ class MainWindow(QMainWindow):
         try:
             ws.sheet_view.rightToLeft = True
         except Exception:
-            pass
+            logger.debug("rightToLeft not supported", exc_info=True)
 
         headers = self.model.headers
         hf = Font(bold=True, color="FFFFFF")
@@ -2237,7 +2241,7 @@ class MainWindow(QMainWindow):
         try:
             ws.sheet_view.rightToLeft = True
         except Exception:
-            pass
+            logger.debug("rightToLeft not supported", exc_info=True)
 
         headers = Meeting.headers()
         for ci, h in enumerate(headers, 1):
@@ -2292,9 +2296,10 @@ class MainWindow(QMainWindow):
     def _show_about(self) -> None:
         QMessageBox.about(
             self, "درباره",
-            "Document & MOM Tracking System\nنسخه ۳.۰\n\n"
+            "Document & MOM Tracking System\nنسخه ۳.۱\n\n"
             "• صورتجلسات • گردش کار • فیلتر • اکسل • تاریخ شمسی\n"
-            "• رصد خودکار وضعیت زنده از گردش کار"
+            "• رصد خودکار وضعیت زنده از گردش کار\n"
+            "• قانون طلایی: ارسال به پیمانکار = اتمام کار"
         )
 
     def _apply_access(self) -> None:
