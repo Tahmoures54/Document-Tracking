@@ -466,24 +466,25 @@ class TrackingDialog(QDialog):
     def _apply_style(self) -> None:
         self.setStyleSheet("""
             QDialog {
-                background-color: #f8fafc;
+                background-color: #f4f7fb;
                 font-family: 'Vazirmatn', 'Tahoma', Arial, sans-serif;
             }
             QGroupBox {
-                font-size: 13px;
+                font-size: 12.5px;
                 font-weight: bold;
                 color: #0f172a;
-                border: 1px solid #cbd5e1;
-                border-radius: 8px;
-                margin-top: 12px;
-                padding-top: 15px;
+                border: 1px solid #d7e1ec;
+                border-radius: 12px;
+                margin-top: 16px;
+                padding: 20px 14px 12px 14px;
                 background-color: #ffffff;
             }
             QGroupBox::title {
                 subcontrol-origin: margin;
                 subcontrol-position: top right;
                 right: 15px;
-                padding: 0 5px;
+                padding: 0 8px;
+                color: #0369a1;
                 background-color: #ffffff;
             }
             QWidget#WarningWidget {
@@ -494,18 +495,21 @@ class TrackingDialog(QDialog):
             QLabel {
                 font-size: 12.5px;
                 color: #334155;
+                padding-top: 2px;
+                padding-bottom: 2px;
             }
             QLineEdit, QComboBox {
                 border: 1px solid #cbd5e1;
-                border-radius: 6px;
-                padding: 5px 10px;
+                border-radius: 9px;
+                padding: 7px 11px;
+                min-height: 30px;
                 background: #ffffff;
                 color: #0f172a;
                 font-size: 12.5px;
             }
             QLineEdit:focus, QComboBox:focus {
-                border-color: #0284c7;
-                background: #f0fdfa;
+                border: 2px solid #0284c7;
+                background: #f8fdff;
             }
             QComboBox QAbstractItemView {
                 border: 1px solid #94a3b8;
@@ -518,8 +522,9 @@ class TrackingDialog(QDialog):
             QPushButton {
                 font-size: 13px;
                 font-weight: bold;
-                border-radius: 6px;
-                padding: 6px 18px;
+                border-radius: 9px;
+                padding: 8px 18px;
+                min-height: 32px;
             }
             QPushButton#btn_primary {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #0284c7, stop:1 #0369a1);
