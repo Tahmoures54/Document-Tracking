@@ -2,14 +2,17 @@
 """
 ui.workflow_dialog
 ماژول هوشمند مدیریت گردش کار صورتجلسه و مانیتورینگ پیشرفت کار تیمی
-نسخه ۳: طراحی بدون تأیید خسته‌کننده، Undo هوشمند، Toast بصری
+نسخه ۳.۱: طراحی بدون تأیید خسته‌کننده، Undo هوشمند، Toast بصری
+(بهسازی‌شده بر اساس تحلیل: رفع باگ Undo با قانون طلایی، کش QFont،
+ debounce روی تغییر مسئول، Dialog جزئیات سفارشی، ثابت‌های تم مرکزی)
 """
 from __future__ import annotations
 
 import csv
 import logging
 from datetime import date
-from typing import Any, Dict, List, Optional
+from functools import lru_cache
+from typing import Any, Dict, List, Optional, Tuple
 
 from PyQt6.QtCore import (
     QEasingCurve,
@@ -32,6 +35,7 @@ from PyQt6.QtWidgets import (
     QApplication,
     QComboBox,
     QDialog,
+    QDialogButtonBox,
     QFileDialog,
     QFormLayout,
     QFrame,
@@ -48,6 +52,7 @@ from PyQt6.QtWidgets import (
     QSizePolicy,
     QTableWidget,
     QTableWidgetItem,
+    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -61,27 +66,65 @@ from utils.date_utils import to_shamsi, today_shamsi
 
 logger = logging.getLogger(__name__)
 
-# ── تنظیمات سراسری ───────────────────────────
+# ═══════════════════════════════════════════════
+#  تنظیمات و ثابت‌های تم مرکزی (تنها منبع حقیقت رنگ‌ها)
+# ═══════════════════════════════════════════════
 UI_FONT_NAME = "Vazirmatn"
 UI_FONT_SIZE = 10
 
 UNDO_TIMEOUT_MS = 6_000  # مهلت undo به میلی‌ثانیه
+RESP_CHANGE_DEBOUNCE_MS = 350  # تأخیر ذخیره تغییر مسئول
+
+# پالت رنگ — تنها نقطه تعریف
+COLOR_SUCCESS = "#10b981"
+COLOR_DANGER = "#ef4444"
+COLOR_WARNING = "#f59e0b"
+COLOR_INFO = "#3b82f6"
+COLOR_NEUTRAL = "#64748b"
+COLOR_REJECT = "#c2410c"
+COLOR_NOTE = "#6366f1"
+
+# رنگ‌های وضعیت گام
+STEP_STATUS_COLORS: Dict[str, QColor] = {
+    "pending":     QColor("#f59e0b"),
+    "in_progress": QColor("#3b82f6"),
+    "completed":   QColor("#10b981"),
+    "rejected":    QColor("#ef4444"),
+}
+
+# وضعیت‌ها با ترجمه و آیکون در یک ساختار واحد
+STEP_STATUS_INFO: Dict[str, Tuple[str, str]] = {
+    # status: (icon, label_fa)
+    "pending":     ("⏳", "آماده اقدام"),
+    "in_progress": ("🔄", "در حال اقدام"),
+    "completed":   ("✅", "تکمیل شد"),
+    "rejected":    ("❌", "عودت برای اصلاح"),
+    "skipped":     ("⏭️", "رد شده / اجرا نشده"),
+}
+
+
+@lru_cache(maxsize=32)
+def _make_font_cached(
+    weight_value: int, size: int
+) -> QFont:
+    """
+    کش‌شده — ساخت QFont گران است و در paint مکرر صدا زده می‌شود.
+    `weight_value` به‌صورت int نگه داشته می‌شود چون QFont.Weight hashable نیست در lru_cache.
+    """
+    f = QFont(UI_FONT_NAME, size)
+    try:
+        f.setWeight(QFont.Weight(weight_value))
+    except Exception:
+        logger.debug("Failed to set font weight %s", weight_value, exc_info=True)
+    return f
 
 
 def get_font(
     weight: QFont.Weight = QFont.Weight.Normal, size_offset: int = 0
 ) -> QFont:
-    return QFont(UI_FONT_NAME, UI_FONT_SIZE + size_offset, weight)
+    """دریافت QFont کش‌شده برای جلوگیری از سربار ساخت."""
+    return _make_font_cached(int(weight.value), UI_FONT_SIZE + size_offset)
 
-
-# ── ترجمه و رنگ‌بندی وضعیت‌ها ─────────────────
-STATUS_FA: Dict[str, str] = {
-    "pending": "آماده اقدام",
-    "in_progress": "در حال اقدام",
-    "completed": "تکمیل شد",
-    "rejected": "عودت برای اصلاح",
-    "skipped": "رد شده / اجرا نشده",
-}
 
 # نام‌های نمایشی روشن‌تر برای پرونده‌های قدیمی؛ نام ذخیره‌شده و سوابق تغییر نمی‌کنند.
 STEP_NAME_LABELS: Dict[str, str] = {
@@ -91,18 +134,6 @@ STEP_NAME_LABELS: Dict[str, str] = {
     "تأیید رئیس دفتر فنی": "۴. کنترل و تأیید رئیس دفتر فنی",
     "تأیید مدیر سایت": "۵. تأیید نهایی مدیر سایت",
     "ابلاغ به پیمانکار": "۶. ابلاغ رسمی به پیمانکار و بستن پرونده",
-}
-STATUS_ICONS: Dict[str, str] = {
-    "pending": "⏳",
-    "in_progress": "🔄",
-    "completed": "✅",
-    "rejected": "❌",
-}
-STATUS_COLORS: Dict[str, QColor] = {
-    "pending": QColor("#f59e0b"),
-    "in_progress": QColor("#3b82f6"),
-    "completed": QColor("#10b981"),
-    "rejected": QColor("#ef4444"),
 }
 
 # ایندکس ستون‌ها
@@ -115,6 +146,18 @@ COL_RESP = 5
 COL_SIGN = 6
 COL_NOTES = 7
 COL_COUNT = 8
+
+
+def _status_label(status: str) -> str:
+    """دریافت متن نمایشی وضعیت (پیش‌فرض امن)."""
+    info = STEP_STATUS_INFO.get(status)
+    return info[1] if info else (status or "نامشخص")
+
+
+def _status_icon(status: str) -> str:
+    """دریافت آیکون وضعیت (پیش‌فرض امن)."""
+    info = STEP_STATUS_INFO.get(status)
+    return info[0] if info else ""
 
 
 # ═══════════════════════════════════════════════
@@ -162,7 +205,7 @@ class _Toast(QFrame):
         self,
         text: str,
         *,
-        color: str = "#10b981",
+        color: str = COLOR_SUCCESS,
         duration_ms: int = 3500,
         undo_callback=None,
         undo_duration_ms: int = UNDO_TIMEOUT_MS,
@@ -251,6 +294,71 @@ class _Toast(QFrame):
 
 
 # ═══════════════════════════════════════════════
+#  StepDetailDialog — نمایش جزئیات گام (جایگزین QMessageBox)
+# ═══════════════════════════════════════════════
+
+
+class StepDetailDialog(QDialog):
+    """دیالوگ جزئیات گام با پشتیبانی از یادداشت‌های طولانی."""
+
+    def __init__(self, step: WorkflowStep, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+        self.setWindowTitle("📋 جزئیات گام")
+        self.resize(560, 480)
+        self.setModal(True)
+        self._build_ui(step)
+
+    def _build_ui(self, step: WorkflowStep) -> None:
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(12)
+
+        entry = (
+            to_shamsi(step.entry_date.isoformat()) if step.entry_date else "ثبت نشده"
+        )
+        exit_ = (
+            to_shamsi(step.exit_date.isoformat()) if step.exit_date else "ثبت نشده"
+        )
+        ic = _status_icon(step.status)
+        st = _status_label(step.status)
+
+        info = QLabel(
+            f"<div style='line-height:1.9'>"
+            f"<b>{ic} {self._step_label_safe(step)}</b><br>"
+            f"<b>وضعیت:</b> {st}<br>"
+            f"<b>📅 ورود:</b> {entry}<br>"
+            f"<b>📅 خروج:</b> {exit_}<br>"
+            f"<b>👤 مسئول:</b> {step.responsible_person or '—'}<br>"
+            f"<b>✒️ امضا:</b> {step.signature or '—'}"
+            f"</div>"
+        )
+        info.setTextFormat(Qt.TextFormat.RichText)
+        info.setFont(get_font())
+        layout.addWidget(info)
+
+        notes_label = QLabel("📝 یادداشت:")
+        notes_label.setFont(get_font(QFont.Weight.Bold))
+        layout.addWidget(notes_label)
+
+        notes_view = QTextEdit()
+        notes_view.setPlainText(step.notes or "—")
+        notes_view.setReadOnly(True)
+        notes_view.setFont(get_font())
+        layout.addWidget(notes_view, stretch=1)
+
+        btn_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        btn_box.rejected.connect(self.reject)
+        btn_box.accepted.connect(self.accept)
+        layout.addWidget(btn_box)
+
+    @staticmethod
+    def _step_label_safe(step: WorkflowStep) -> str:
+        name = (step.step_name or "").strip()
+        return STEP_NAME_LABELS.get(name, name) or "—"
+
+
+# ═══════════════════════════════════════════════
 #  PerformanceReportDialog — گزارش عملکرد
 # ═══════════════════════════════════════════════
 
@@ -258,18 +366,6 @@ class _Toast(QFrame):
 class PerformanceReportDialog(QDialog):
     """دیالوگ نمایش مصور عملکرد کارشناسان."""
 
-    def __init__(
-        self, data: List[Dict[str, Any]], parent: Optional[QWidget] = None
-    ) -> None:
-        super().__init__(parent)
-        self.data = data
-        self.setWindowTitle("📊 گزارش عملکرد کارشناسان")
-        self.resize(750, 480)
-        self.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
-        self.setModal(True)
-        self._build_ui()
-
-    # ── استایل مشترک ──
     _STYLE = """
         QDialog { background-color: #f8fafc; }
         QTableWidget {
@@ -283,6 +379,17 @@ class PerformanceReportDialog(QDialog):
         QTableWidget::item { padding: 6px; }
         QTableWidget::item:selected { background-color: #dbeafe; color: #1e40af; }
     """
+
+    def __init__(
+        self, data: List[Dict[str, Any]], parent: Optional[QWidget] = None
+    ) -> None:
+        super().__init__(parent)
+        self.data = data
+        self.setWindowTitle("📊 گزارش عملکرد کارشناسان")
+        self.resize(750, 480)
+        self.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+        self.setModal(True)
+        self._build_ui()
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -317,10 +424,10 @@ class PerformanceReportDialog(QDialog):
         layout.addWidget(self.table)
 
         btn_row = QHBoxLayout()
-        btn_save = self._make_btn(
-            "💾 خروجی CSV", "#10b981", self._save_csv
+        btn_save = self._make_btn("💾 خروجی CSV", COLOR_SUCCESS, self._save_csv)
+        btn_close = self._make_btn(
+            "بستن", "#e2e8f0", self.accept, fg="#1e293b"
         )
-        btn_close = self._make_btn("بستن", "#e2e8f0", self.accept, fg="#1e293b")
         btn_row.addWidget(btn_save)
         btn_row.addStretch()
         btn_row.addWidget(btn_close)
@@ -418,38 +525,6 @@ class PerformanceReportDialog(QDialog):
 class WorkflowDialog(QDialog):
     """دیالوگ جامع مدیریت گردش کار — بدون تأیید خسته‌کننده، با Undo هوشمند."""
 
-    def __init__(
-        self,
-        db: DatabaseManager,
-        meeting: Meeting,
-        parent: Optional[QWidget] = None,
-    ) -> None:
-        super().__init__(parent)
-        self.db = db
-        self.meeting = meeting
-        self.steps: List[WorkflowStep] = []
-        self.active_users: List[str] = []
-
-        self.settings = QSettings(ORG_NAME, APP_NAME)
-        self._selected_step_id: Optional[int] = None
-
-        self._init_session(parent)
-
-        self.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
-        self.setWindowTitle(
-            f"گردش کار — {meeting.meeting_number}"
-        )
-        self.resize(1080, 720)
-        self.setMinimumSize(880, 580)
-        self.setModal(True)
-        self.setStyleSheet(self._STYLESHEET)
-
-        self._build_ui()
-        self._restore_geometry()
-        self._load_active_users()
-        self._load_steps()
-
-    # ── استایل یکپارچه ──
     _STYLESHEET = """
         QDialog {
             background-color: #f4f7fb;
@@ -496,6 +571,43 @@ class WorkflowDialog(QDialog):
         QPushButton:focus { border: 2px solid #60a5fa; }
     """
 
+    def __init__(
+        self,
+        db: DatabaseManager,
+        meeting: Meeting,
+        parent: Optional[QWidget] = None,
+    ) -> None:
+        super().__init__(parent)
+        self.db = db
+        self.meeting = meeting
+        self.steps: List[WorkflowStep] = []
+        self.active_users: List[str] = []
+
+        self.settings = QSettings(ORG_NAME, APP_NAME)
+        self._selected_step_id: Optional[int] = None
+        self._cursor_depth: int = 0  # برای reentrancy امن در _with_wait_cursor
+
+        # Debounce برای ذخیره تغییر مسئول
+        self._resp_save_timer = QTimer(self)
+        self._resp_save_timer.setSingleShot(True)
+        self._resp_save_timer.setInterval(RESP_CHANGE_DEBOUNCE_MS)
+        self._resp_save_timer.timeout.connect(self._flush_resp_change)
+        self._pending_resp: Optional[Tuple[int, Optional[str], QComboBox]] = None
+
+        self._init_session(parent)
+
+        self.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+        self.setWindowTitle(f"گردش کار — {meeting.meeting_number}")
+        self.resize(1080, 720)
+        self.setMinimumSize(880, 580)
+        self.setModal(True)
+        self.setStyleSheet(self._STYLESHEET)
+
+        self._build_ui()
+        self._restore_geometry()
+        self._load_active_users()
+        self._load_steps()
+
     # ── ساختار رابط ──
 
     def _build_ui(self) -> None:
@@ -541,8 +653,14 @@ class WorkflowDialog(QDialog):
         form.addRow("موضوع:", lbl(self.meeting.subject))
         form.addRow("پیمانکار:", lbl(self.meeting.contractor or "—"))
         form.addRow("تاریخ:", lbl(md))
-        tip = QLabel("روش کار: مرحله جاری را انتخاب کنید؛ «شروع اقدام» را بزنید و پس از انجام کار، «تکمیل مرحله» را ثبت کنید. اگر نقصی وجود دارد، «عودت برای اصلاح» را همراه با علت ثبت کنید.")
-        tip.setStyleSheet("color: #64748b; font-size: 11px; font-style: italic;")
+        tip = QLabel(
+            "روش کار: مرحله جاری را انتخاب کنید؛ «شروع اقدام» را بزنید و پس از "
+            "انجام کار، «تکمیل مرحله» را ثبت کنید. اگر نقصی وجود دارد، "
+            "«عودت برای اصلاح» را همراه با علت ثبت کنید."
+        )
+        tip.setStyleSheet(
+            f"color: {COLOR_NEUTRAL}; font-size: 11px; font-style: italic;"
+        )
         tip.setWordWrap(True)
         form.addRow(tip)
         return box
@@ -589,21 +707,17 @@ class WorkflowDialog(QDialog):
 
         hdr = self.table.horizontalHeader()
         hdr.setFont(get_font(QFont.Weight.Bold))
-        for col in range(COL_COUNT):
-            if col == COL_NOTES:
-                hdr.setSectionResizeMode(col, QHeaderView.ResizeMode.Stretch)
-            elif col == COL_IDX:
-                hdr.setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
-                self.table.setColumnWidth(col, 42)
-            elif col == COL_NAME:
-                hdr.setSectionResizeMode(col, QHeaderView.ResizeMode.Stretch)
-                self.table.setColumnWidth(col, 270)
-            elif col == COL_STATUS:
-                hdr.setSectionResizeMode(col, QHeaderView.ResizeMode.ResizeToContents)
-            else:
-                hdr.setSectionResizeMode(
-                    col, QHeaderView.ResizeMode.ResizeToContents
-                )
+
+        # ترتیب منطقی: اول Stretch ها، سپس ResizeToContents و Fixed
+        # (از فشردگی عرض Fixed روی Stretch جلوگیری می‌کند)
+        for col in (COL_NAME, COL_NOTES):
+            hdr.setSectionResizeMode(col, QHeaderView.ResizeMode.Stretch)
+
+        for col in (COL_STATUS, COL_ENTRY, COL_EXIT, COL_RESP, COL_SIGN):
+            hdr.setSectionResizeMode(col, QHeaderView.ResizeMode.ResizeToContents)
+
+        hdr.setSectionResizeMode(COL_IDX, QHeaderView.ResizeMode.Fixed)
+        self.table.setColumnWidth(COL_IDX, 42)
 
         self.table.verticalHeader().setVisible(False)
         self.table.setAlternatingRowColors(True)
@@ -620,7 +734,7 @@ class WorkflowDialog(QDialog):
         return self.table
 
     def _build_action_buttons(self) -> QVBoxLayout:
-        """دو ردیف جدا برای عملیات اصلی و ابزارهای کمکی؛ بدون مخفی‌شدن دکمه‌ها."""
+        """دو ردیف جدا برای عملیات اصلی و ابزارهای کمکی."""
         rows = QVBoxLayout()
         rows.setSpacing(6)
         primary = QHBoxLayout()
@@ -628,16 +742,12 @@ class WorkflowDialog(QDialog):
         primary.setSpacing(6)
         secondary.setSpacing(6)
 
-        def _btn(
-            attr, text, tip, bg="#ffffff", fg="#0f172a", target=primary
-        ):
+        def _btn(attr, text, tip, bg="#ffffff", fg="#0f172a", target=primary):
             b = QPushButton(text)
             b.setToolTip(tip)
             b.setFont(get_font(QFont.Weight.Bold, -1))
             b.setCursor(Qt.CursorShape.PointingHandCursor)
-            b.setSizePolicy(
-                QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed
-            )
+            b.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
             b.setMinimumHeight(36)
             b.setStyleSheet(
                 f"""
@@ -665,10 +775,7 @@ class WorkflowDialog(QDialog):
             "ثبت علت نقص و بازگرداندن مرحله جاری برای اصلاح",
             "#ffedd5", "#9a3412",
         )
-        _btn(
-            "btn_reopen", "🔄 ادامه پس از اصلاح",
-            "بازگشایی مرحله عودت‌شده  Ctrl+B",
-        )
+        _btn("btn_reopen", "🔄 ادامه پس از اصلاح", "بازگشایی مرحله عودت‌شده  Ctrl+B")
         _btn("btn_prev", "↶ بازگردانی مرحله", "لغو گام و بازگشت به مرحله قبل")
         primary.addStretch()
 
@@ -744,10 +851,13 @@ class WorkflowDialog(QDialog):
         )
 
     def closeEvent(self, event: QCloseEvent) -> None:
+        # ذخیره تغییر مسئول در انتظار (اگر debounce هنوز در جریان است)
+        self._flush_resp_change()
         self._save_geometry()
         super().closeEvent(event)
 
     def reject(self) -> None:
+        self._flush_resp_change()
         self._save_geometry()
         super().reject()
 
@@ -777,20 +887,29 @@ class WorkflowDialog(QDialog):
     def _need_write(self) -> bool:
         if not self._has_perm(PERM_REPORT_WRITE):
             self.toast.show_message(
-                "⛔ دسترسی ویرایش ندارید", color="#ef4444"
+                "⛔ دسترسی ویرایش ندارید", color=COLOR_DANGER
             )
             return False
         return True
 
-    # ── بارگذاری داده ──
+    # ── اجرای امن با cursor انتظار (reentrancy-aware) ──
 
-    def _with_wait_cursor(self, fn):
-        """اجرای یک تابع با نشانگر انتظار."""
-        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+    def _with_wait_cursor(self, fn) -> None:
+        """
+        اجرای یک تابع با نشانگر انتظار.
+        در صورت فراخوانی تودرتو، فقط سطح بیرونی cursor را override می‌کند.
+        """
+        self._cursor_depth += 1
+        if self._cursor_depth == 1:
+            QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
             fn()
         finally:
-            QApplication.restoreOverrideCursor()
+            self._cursor_depth -= 1
+            if self._cursor_depth == 0:
+                QApplication.restoreOverrideCursor()
+
+    # ── بارگذاری داده ──
 
     def _load_active_users(self) -> None:
         try:
@@ -798,9 +917,10 @@ class WorkflowDialog(QDialog):
         except Exception as exc:
             logger.exception("Failed to load users")
             self.active_users = []
-            self.toast.show_message(
-                f"خطا در خواندن کاربران: {exc}", color="#ef4444"
-            )
+            if hasattr(self, "toast"):
+                self.toast.show_message(
+                    f"خطا در خواندن کاربران: {exc}", color=COLOR_DANGER
+                )
 
     def _load_steps(self) -> None:
         prev = self._get_selected_step()
@@ -816,7 +936,10 @@ class WorkflowDialog(QDialog):
             self._with_wait_cursor(_do)
         except Exception as exc:
             logger.exception("Failed to load steps")
-            QMessageBox.critical(self, "خطا", str(exc))
+            if hasattr(self, "toast"):
+                self.toast.show_message(
+                    f"خطا در بارگذاری گام‌ها: {exc}", color=COLOR_DANGER
+                )
             return
 
         self._populate_table()
@@ -841,6 +964,8 @@ class WorkflowDialog(QDialog):
     # ── پرکردن جدول ──
 
     def _populate_table(self) -> None:
+        # قبل از reset، comboboxهای قبلی را پاک می‌کنیم تا از نشت منابع جلوگیری شود
+        self.table.clearContents()
         self.table.setRowCount(len(self.steps))
         for i, step in enumerate(self.steps):
             self._set_row(i, step)
@@ -852,7 +977,7 @@ class WorkflowDialog(QDialog):
         return STEP_NAME_LABELS.get(name, name)
 
     def _set_row(self, row: int, step: WorkflowStep) -> None:
-        sc = STATUS_COLORS.get(step.status)
+        sc = STEP_STATUS_COLORS.get(step.status)
         bg = QBrush(sc.lighter(185)) if sc else QBrush()
         fg = QBrush(sc.darker(160)) if sc else QBrush()
 
@@ -874,21 +999,19 @@ class WorkflowDialog(QDialog):
         exit_ = (
             to_shamsi(step.exit_date.isoformat()) if step.exit_date else ""
         )
-        icon = STATUS_ICONS.get(step.status, "")
+        icon = _status_icon(step.status)
 
         self.table.setItem(row, COL_IDX, cell(str(row + 1)))
         name_it = cell(f"{icon} {self._step_label(step)}", False, True)
         name_it.setToolTip(self._step_label(step))
         self.table.setItem(row, COL_NAME, name_it)
-        status_text = STATUS_FA.get(step.status, step.status or "نامشخص")
+        status_text = _status_label(step.status)
         self.table.setItem(
             row, COL_STATUS, cell(f"{icon} {status_text}", center=True, bold=True)
         )
         self.table.setItem(row, COL_ENTRY, cell(entry))
         self.table.setItem(row, COL_EXIT, cell(exit_))
-        self.table.setCellWidget(
-            row, COL_RESP, self._make_resp_combo(step)
-        )
+        self.table.setCellWidget(row, COL_RESP, self._make_resp_combo(step))
         self.table.setItem(row, COL_SIGN, cell(step.signature or ""))
         notes_it = cell(step.notes or "", center=False)
         notes_it.setToolTip(step.notes or "")
@@ -925,14 +1048,22 @@ class WorkflowDialog(QDialog):
             step.status != "completed"
             and self._has_perm(PERM_REPORT_WRITE)
         )
+        # Debounce: به جای ذخیره فوری، در تایمر ذخیره می‌شود
         cb.currentIndexChanged.connect(self._on_resp_changed)
         return cb
 
     def _on_resp_changed(self) -> None:
+        """
+        ثبت درخواست تغییر مسئول با debounce.
+        اگر کاربر سریعاً چند مسئول را امتحان کند، فقط آخرین مقدار ذخیره می‌شود.
+        """
         cb = self.sender()
         if not isinstance(cb, QComboBox) or cb.signalsBlocked():
             return
-        if not self._need_write():
+        if not self._has_perm(PERM_REPORT_WRITE):
+            self.toast.show_message(
+                "⛔ دسترسی ویرایش ندارید", color=COLOR_DANGER
+            )
             cb.blockSignals(True)
             self._load_steps()
             cb.blockSignals(False)
@@ -941,23 +1072,41 @@ class WorkflowDialog(QDialog):
         if not step_id:
             return
         val = (str(cb.currentData() or "")).strip() or None
+        self._pending_resp = (int(step_id), val, cb)
+        self._resp_save_timer.start()
+
+    def _flush_resp_change(self) -> None:
+        """ذخیره فوری تغییر مسئول در انتظار (برای closeEvent یا reject)."""
+        if not self._pending_resp:
+            return
+        step_id, val, cb = self._pending_resp
+        self._pending_resp = None
         try:
             self.db.update_workflow_step(
-                step_id=int(step_id), responsible_person=val
+                step_id=step_id, responsible_person=val
             )
+            for s in self.steps:
+                if s.id == step_id:
+                    s.responsible_person = val
+                    break
+            # بروزرسانی local (بدون reload کامل)
+            self._update_status()
+            if hasattr(self, "toast"):
+                self.toast.show_message(
+                    "✅ کارشناس مسئول تغییر یافت", color=COLOR_INFO
+                )
         except Exception as exc:
             logger.exception("resp update failed")
-            self.toast.show_message(f"خطا: {exc}", color="#ef4444")
-            cb.blockSignals(True)
-            self._load_steps()
-            cb.blockSignals(False)
-            return
-        for s in self.steps:
-            if s.id == int(step_id):
-                s.responsible_person = val
-                break
-        self._update_status()
-        self.toast.show_message("✅ کارشناس مسئول تغییر یافت", color="#3b82f6")
+            if hasattr(self, "toast"):
+                self.toast.show_message(f"خطا: {exc}", color=COLOR_DANGER)
+            # بازگردانی UI به DB
+            try:
+                if cb is not None:
+                    cb.blockSignals(True)
+                self._load_steps()
+            finally:
+                if cb is not None:
+                    cb.blockSignals(False)
 
     # ── کمکی ──
 
@@ -973,7 +1122,7 @@ class WorkflowDialog(QDialog):
         s = self._get_selected_step()
         if not s:
             self.toast.show_message(
-                "ابتدا یک ردیف را انتخاب کنید", color="#f59e0b"
+                "ابتدا یک ردیف را انتخاب کنید", color=COLOR_WARNING
             )
             return None
         self._selected_step_id = s.id
@@ -990,6 +1139,9 @@ class WorkflowDialog(QDialog):
             s.step_order < step.step_order and s.status != "completed"
             for s in self.steps
         )
+
+    def _max_step_order(self) -> int:
+        return max((s.step_order for s in self.steps), default=0)
 
     # ── وضعیت و پروگرس ──
 
@@ -1025,8 +1177,8 @@ class WorkflowDialog(QDialog):
                 "font-weight:bold;}"
             )
         elif active:
-            ic = STATUS_ICONS.get(active.status, "")
-            la = STATUS_FA.get(active.status, active.status)
+            ic = _status_icon(active.status)
+            la = _status_label(active.status)
             self.lbl_status.setText(
                 f"{ic} مرحله جاری: {self._step_label(active)} — وضعیت: {la}"
             )
@@ -1077,19 +1229,24 @@ class WorkflowDialog(QDialog):
         self.btn_perf.setEnabled(hr)
 
     # ══════════════════════════════════════
-    #  عملیات‌ — بدون تأیید اضافی + Undo
+    #  عملیات — بدون تأیید اضافی + Undo
     # ══════════════════════════════════════
 
     def _snapshot_step(self, step: WorkflowStep) -> Dict[str, Any]:
         """عکس فوری از گام و وضعیت ابلاغ پرونده برای Undo."""
-        with self.db.session() as sess:
-            meeting = sess.get(Meeting, self.meeting.id)
-            meeting_state = {
-                "sent_to_contractor_date": meeting.sent_to_contractor_date,
-                "closing_date": meeting.closing_date,
-                "contractor_response_date": meeting.contractor_response_date,
-                "status": meeting.status,
-            } if meeting else None
+        meeting_state: Optional[Dict[str, Any]] = None
+        try:
+            with self.db.session() as sess:
+                meeting = sess.get(Meeting, self.meeting.id)
+                if meeting:
+                    meeting_state = {
+                        "sent_to_contractor_date": meeting.sent_to_contractor_date,
+                        "closing_date": meeting.closing_date,
+                        "contractor_response_date": meeting.contractor_response_date,
+                        "status": meeting.status,
+                    }
+        except Exception:
+            logger.exception("Snapshot meeting state failed")
         return {
             "id": step.id,
             "entry_date": step.entry_date,
@@ -1102,7 +1259,14 @@ class WorkflowDialog(QDialog):
         }
 
     def _apply_snapshot(self, snap: Dict[str, Any]) -> None:
-        """بازگرداندن گام و وضعیت پرونده به عکس فوری ذخیره‌شده."""
+        """
+        بازگرداندن گام و وضعیت پرونده به عکس فوری ذخیره‌شده.
+
+        نکته مهم (رفع باگ): وضعیت گام‌های دیگر پرونده در زمان Undo
+        از DB تازه خوانده می‌شود تا با اثرات «قانون طلایی»
+        (که main_window پس از ابلاغ، همه گام‌ها را completed می‌کند)
+        سازگار بماند. سپس `_load_steps` همه چیز را از DB می‌خواند.
+        """
         try:
             with self.db.session() as sess:
                 db_step = sess.get(WorkflowStep, snap["id"])
@@ -1113,20 +1277,75 @@ class WorkflowDialog(QDialog):
                     "signature", "status", "notes",
                 ):
                     setattr(db_step, field, snap[field])
+
                 meeting_state = snap.get("meeting_state")
                 meeting = sess.get(Meeting, self.meeting.id)
                 if meeting and meeting_state:
                     for field, value in meeting_state.items():
                         setattr(meeting, field, value)
+
+                    # ⚠️ رفع باگ: اگر Undo باعث شد پرونده دیگر «ابلاغ شده» نباشد،
+                    # گام‌هایی که توسط Golden Rule در main_window بسته شده بودند
+                    # باید به وضعیت «pending» یا «in_progress» برگردند.
+                    if not meeting_state.get("sent_to_contractor_date"):
+                        self._reopen_steps_closed_by_golden_rule(sess, meeting)
+
                 sess.commit()
+
+            # همگام‌سازی شیء در حافظه
+            meeting_state = snap.get("meeting_state")
             if meeting_state:
                 for field, value in meeting_state.items():
                     setattr(self.meeting, field, value)
+
             self._load_steps()
-            self.toast.show_message("تغییر قبلی بازگردانده شد.", color="#64748b")
+            self.toast.show_message(
+                "تغییر قبلی بازگردانده شد.", color=COLOR_NEUTRAL
+            )
         except Exception as exc:
             logger.exception("Undo failed")
-            self.toast.show_message(f"خطا در بازگردانی: {exc}", color="#ef4444")
+            self.toast.show_message(
+                f"خطا در بازگردانی: {exc}", color=COLOR_DANGER
+            )
+
+    def _reopen_steps_closed_by_golden_rule(self, sess, meeting: Meeting) -> None:
+        """
+        اگر Undo باعث شد پرونده از حالت «ابلاغ‌شده» خارج شود، گام‌هایی که
+        در main_window._apply_live_status به‌صورت خودکار completed شده‌اند
+        (یعنی تاریخ exit_date آن‌ها با sent_to_contractor_date قبلی برابر است)
+        به وضعیت منطقی برمی‌گردند.
+        """
+        prev_contractor_date = None
+        prev_state = self._last_applied_contractor_date
+        if prev_state is not None:
+            prev_contractor_date = prev_state
+
+        steps = (
+            sess.query(WorkflowStep)
+            .filter(WorkflowStep.meeting_id == meeting.id)
+            .order_by(WorkflowStep.step_order.asc())
+            .all()
+        )
+        if not steps:
+            return
+
+        # آخرین گامی که در حالت عادی کاربر تکمیل کرده (signature دارد)
+        # به‌عنوان مرز بین «تکمیل واقعی» و «تکمیل خودکار» در نظر گرفته می‌شود.
+        last_user_completed_order = 0
+        for s in steps:
+            if s.status == "completed" and s.signature:
+                last_user_completed_order = max(
+                    last_user_completed_order, s.step_order
+                )
+
+        for s in steps:
+            if s.status != "completed":
+                continue
+            # گام‌هایی که امضای کاربر ندارند → توسط Golden Rule بسته شده‌اند
+            if not s.signature and s.step_order > last_user_completed_order:
+                s.status = "pending"
+                s.entry_date = None
+                s.exit_date = None
 
     # ── شروع اقدام ──
 
@@ -1138,12 +1357,12 @@ class WorkflowDialog(QDialog):
             return
         if step.status != "pending":
             self.toast.show_message(
-                "فقط گام‌های «در انتظار» قابل شروع هستند", color="#f59e0b"
+                "فقط گام‌های «در انتظار» قابل شروع هستند", color=COLOR_WARNING
             )
             return
         if self._find_step("in_progress"):
             self.toast.show_message(
-                "ابتدا گام باز فعلی را تکمیل کنید", color="#f59e0b"
+                "ابتدا گام باز فعلی را تکمیل کنید", color=COLOR_WARNING
             )
             return
 
@@ -1154,7 +1373,7 @@ class WorkflowDialog(QDialog):
             )
             self.toast.show_message(
                 f"ابتدا مرحله قبلی را تکمیل کنید: {self._step_label(previous)}",
-                color="#f59e0b",
+                color=COLOR_WARNING,
                 duration_ms=5000,
             )
             return
@@ -1174,12 +1393,12 @@ class WorkflowDialog(QDialog):
             self._load_steps()
             self.toast.show_message(
                 f"📥 «{self._step_label(step)}» آغاز شد — مسئول: {responsible}",
-                color="#3b82f6",
+                color=COLOR_INFO,
                 undo_callback=lambda: self._apply_snapshot(snap),
             )
         except Exception as exc:
             logger.exception("entry failed")
-            self.toast.show_message(f"خطا: {exc}", color="#ef4444")
+            self.toast.show_message(f"خطا: {exc}", color=COLOR_DANGER)
 
     # ── تکمیل و امضا ──
 
@@ -1191,11 +1410,13 @@ class WorkflowDialog(QDialog):
             return
         if step.status != "in_progress":
             self.toast.show_message(
-                "فقط گام «در حال اقدام» قابل تکمیل است", color="#f59e0b"
+                "فقط گام «در حال اقدام» قابل تکمیل است", color=COLOR_WARNING
             )
             return
 
         snap = self._snapshot_step(step)
+        is_final = step.step_order == self._max_step_order()
+
         try:
             with self.db.session() as sess:
                 db_step = sess.get(WorkflowStep, step.id)
@@ -1205,28 +1426,31 @@ class WorkflowDialog(QDialog):
                 db_step.signature = self.current_user
                 db_step.status = "completed"
 
-                # تکمیل آخرین مرحله، ابلاغ رسمی و بستن پرونده را نیز ثبت می‌کند.
-                if step.step_order == max((s.step_order for s in self.steps), default=step.step_order):
+                # تکمیل آخرین مرحله → ابلاغ رسمی و بستن پرونده
+                if is_final:
                     db_meeting = sess.get(Meeting, self.meeting.id)
                     if db_meeting:
                         db_meeting.set_dispatched_to_contractor(date.today())
                 sess.commit()
 
-            if step.step_order == max((s.step_order for s in self.steps), default=step.step_order):
+            if is_final:
                 self.meeting.set_dispatched_to_contractor(date.today())
-                message = f"✅ «{self._step_label(step)}» تکمیل شد؛ ابلاغ ثبت و پرونده بسته شد."
+                message = (
+                    f"✅ «{self._step_label(step)}» تکمیل شد؛ "
+                    "ابلاغ ثبت و پرونده بسته شد."
+                )
             else:
                 message = f"✅ «{self._step_label(step)}» تکمیل و امضا شد."
 
             self._load_steps()
             self.toast.show_message(
                 message,
-                color="#10b981",
+                color=COLOR_SUCCESS,
                 undo_callback=lambda: self._apply_snapshot(snap),
             )
         except Exception as exc:
             logger.exception("exit failed")
-            self.toast.show_message(f"خطا: {exc}", color="#ef4444")
+            self.toast.show_message(f"خطا: {exc}", color=COLOR_DANGER)
 
     # ── عودت برای اصلاح ──
 
@@ -1240,7 +1464,7 @@ class WorkflowDialog(QDialog):
         if step.status != "in_progress":
             self.toast.show_message(
                 "برای عودت، ابتدا مرحله را شروع کنید و سپس علت نقص را ثبت کنید.",
-                color="#f59e0b",
+                color=COLOR_WARNING,
             )
             return
 
@@ -1275,12 +1499,14 @@ class WorkflowDialog(QDialog):
             self._load_steps()
             self.toast.show_message(
                 f"↩️ «{self._step_label(step)}» عودت شد؛ علت ثبت شد.",
-                color="#c2410c",
+                color=COLOR_REJECT,
                 undo_callback=lambda: self._apply_snapshot(snap),
             )
         except Exception as exc:
             logger.exception("reject step failed")
-            self.toast.show_message(f"خطا در ثبت عودت: {exc}", color="#ef4444")
+            self.toast.show_message(
+                f"خطا در ثبت عودت: {exc}", color=COLOR_DANGER
+            )
 
     # ── بازگشایی ردیف رد شده ──
 
@@ -1292,12 +1518,12 @@ class WorkflowDialog(QDialog):
             return
         if step.status != "rejected":
             self.toast.show_message(
-                "فقط گام‌های «رد شده» قابل بازگشایی‌اند", color="#f59e0b"
+                "فقط گام‌های «رد شده» قابل بازگشایی‌اند", color=COLOR_WARNING
             )
             return
         if self._find_step("in_progress"):
             self.toast.show_message(
-                "ابتدا گام باز را تکمیل کنید", color="#f59e0b"
+                "ابتدا گام باز را تکمیل کنید", color=COLOR_WARNING
             )
             return
 
@@ -1315,12 +1541,12 @@ class WorkflowDialog(QDialog):
             self._load_steps()
             self.toast.show_message(
                 f"🔄 «{self._step_label(step)}» بازگشایی شد",
-                color="#3b82f6",
+                color=COLOR_INFO,
                 undo_callback=lambda: self._apply_snapshot(snap),
             )
         except Exception as exc:
             logger.exception("reopen failed")
-            self.toast.show_message(f"خطا: {exc}", color="#ef4444")
+            self.toast.show_message(f"خطا: {exc}", color=COLOR_DANGER)
 
     # ── بازگردانی به مرحله قبل ──
     # ⚠️ تنها عملیاتی که هنوز تأیید می‌گیرد — چون مراحل بعدی ریست می‌شوند
@@ -1334,17 +1560,16 @@ class WorkflowDialog(QDialog):
         if step.status not in ("in_progress", "completed"):
             self.toast.show_message(
                 "فقط گام «در جریان» یا «تکمیل‌شده» قابل عودت است",
-                color="#f59e0b",
+                color=COLOR_WARNING,
             )
             return
         ip = self._find_step("in_progress")
         if step.status == "completed" and ip is not None:
             self.toast.show_message(
-                "ابتدا گام باز را نهایی کنید", color="#f59e0b"
+                "ابتدا گام باز را نهایی کنید", color=COLOR_WARNING
             )
             return
 
-        # ⚠️ تأیید فقط اینجا — چون ریست زنجیره‌ای انجام می‌شود
         reply = QMessageBox.question(
             self,
             "بازگردانی گام",
@@ -1359,13 +1584,15 @@ class WorkflowDialog(QDialog):
             self._db_revert_step(step)
             self._load_steps()
             self.toast.show_message(
-                f"↩️ «{self._step_label(step)}» بازگردانی شد", color="#f59e0b"
+                f"↩️ «{self._step_label(step)}» بازگردانی شد",
+                color=COLOR_WARNING,
             )
         except Exception as exc:
             logger.exception("revert failed")
-            self.toast.show_message(f"خطا: {exc}", color="#ef4444")
+            self.toast.show_message(f"خطا: {exc}", color=COLOR_DANGER)
 
     def _db_revert_step(self, step: WorkflowStep) -> None:
+        is_final = step.step_order == self._max_step_order()
         with self.db.session() as sess:
             db_step = sess.get(WorkflowStep, step.id)
             if not db_step:
@@ -1393,7 +1620,7 @@ class WorkflowDialog(QDialog):
                 db_step.exit_date = None
                 db_step.signature = None
 
-            if step.step_order == max((s.step_order for s in self.steps), default=step.step_order):
+            if is_final:
                 meeting = sess.get(Meeting, self.meeting.id)
                 if meeting:
                     meeting.sent_to_contractor_date = None
@@ -1401,11 +1628,12 @@ class WorkflowDialog(QDialog):
                     meeting.contractor_response_date = None
                     meeting.status = STATUS_PENDING
             sess.commit()
-            if step.step_order == max((s.step_order for s in self.steps), default=step.step_order):
-                self.meeting.sent_to_contractor_date = None
-                self.meeting.closing_date = None
-                self.meeting.contractor_response_date = None
-                self.meeting.status = STATUS_PENDING
+
+        if is_final:
+            self.meeting.sent_to_contractor_date = None
+            self.meeting.closing_date = None
+            self.meeting.contractor_response_date = None
+            self.meeting.status = STATUS_PENDING
 
     # ── ویرایش یادداشت ──
 
@@ -1428,33 +1656,33 @@ class WorkflowDialog(QDialog):
                 step_id=step.id, notes=(notes or "").strip()
             )
             self._load_steps()
-            self.toast.show_message("📝 یادداشت ذخیره شد", color="#6366f1")
+            self.toast.show_message("📝 یادداشت ذخیره شد", color=COLOR_NOTE)
         except Exception as exc:
-            self.toast.show_message(f"خطا: {exc}", color="#ef4444")
+            self.toast.show_message(f"خطا: {exc}", color=COLOR_DANGER)
 
     # ── گزارش عملکرد ──
 
     def show_performance_report(self) -> None:
         if not self._has_perm(PERM_REPORT_READ):
-            self.toast.show_message("دسترسی ندارید", color="#ef4444")
+            self.toast.show_message("دسترسی ندارید", color=COLOR_DANGER)
             return
         try:
             rows = self.db.workflow_performance_by_user()
             if not rows:
                 self.toast.show_message(
-                    "هنوز رکوردی ثبت نشده", color="#f59e0b"
+                    "هنوز رکوردی ثبت نشده", color=COLOR_WARNING
                 )
                 return
             PerformanceReportDialog(data=rows, parent=self).exec()
         except Exception as exc:
             logger.exception("perf report failed")
-            self.toast.show_message(f"خطا: {exc}", color="#ef4444")
+            self.toast.show_message(f"خطا: {exc}", color=COLOR_DANGER)
 
     # ── چاپ ──
 
     def save_and_print_report(self) -> None:
         if not self._has_perm(PERM_REPORT_READ):
-            self.toast.show_message("دسترسی ندارید", color="#ef4444")
+            self.toast.show_message("دسترسی ندارید", color=COLOR_DANGER)
             return
         try:
             gen = WorkflowReportGenerator(
@@ -1463,11 +1691,11 @@ class WorkflowDialog(QDialog):
             gen.generate_and_open()
             self.toast.show_message(
                 "🖨️ سند گردش کار آماده چاپ شد — Ctrl+P در مرورگر",
-                color="#10b981",
+                color=COLOR_SUCCESS,
             )
         except Exception as exc:
             logger.exception("print failed")
-            self.toast.show_message(f"خطا: {exc}", color="#ef4444")
+            self.toast.show_message(f"خطا: {exc}", color=COLOR_DANGER)
 
     # ── منوی راست‌کلیک ──
 
@@ -1477,6 +1705,8 @@ class WorkflowDialog(QDialog):
             return
         row = item.row()
         self.table.selectRow(row)
+        if not (0 <= row < len(self.steps)):
+            return
         step = self.steps[row]
         self._selected_step_id = step.id
 
@@ -1492,17 +1722,13 @@ class WorkflowDialog(QDialog):
         menu.addSeparator()
 
         a_entry = menu.addAction("📥 شروع اقدام")
-        a_entry.setEnabled(
-            step.status == "pending" and hw and ip is None
-        )
+        a_entry.setEnabled(step.status == "pending" and hw and ip is None)
 
         a_exit = menu.addAction("📤 تکمیل و امضا")
         a_exit.setEnabled(step.status == "in_progress" and hw)
 
         a_rev = menu.addAction("↩️ بازگردانی")
-        a_rev.setEnabled(
-            step.status in ("in_progress", "completed") and hw
-        )
+        a_rev.setEnabled(step.status in ("in_progress", "completed") and hw)
 
         a_reopen = menu.addAction("🔄 ادامه پس از اصلاح")
         a_reopen.setEnabled(
@@ -1554,9 +1780,7 @@ class WorkflowDialog(QDialog):
             if step.status == "in_progress":
                 self.exit_step()
                 return
-            if step.status == "rejected" and not self._find_step(
-                "in_progress"
-            ):
+            if step.status == "rejected" and not self._find_step("in_progress"):
                 self.reopen_step()
                 return
 
@@ -1565,27 +1789,5 @@ class WorkflowDialog(QDialog):
     # ── جزئیات گام ──
 
     def _show_step_detail(self, step: WorkflowStep) -> None:
-        entry = (
-            to_shamsi(step.entry_date.isoformat())
-            if step.entry_date
-            else "ثبت نشده"
-        )
-        exit_ = (
-            to_shamsi(step.exit_date.isoformat())
-            if step.exit_date
-            else "ثبت نشده"
-        )
-        ic = STATUS_ICONS.get(step.status, "")
-        st = STATUS_FA.get(step.status, step.status)
-
-        QMessageBox.information(
-            self,
-            "جزئیات گام",
-            f"📋 {self._step_label(step)}\n"
-            f"وضعیت: {ic} {st}\n\n"
-            f"📅 ورود: {entry}\n"
-            f"📅 خروج: {exit_}\n\n"
-            f"👤 مسئول: {step.responsible_person or '—'}\n"
-            f"✒️ امضا: {step.signature or '—'}\n\n"
-            f"📝 یادداشت:\n{step.notes or '—'}",
-        )
+        """نمایش جزئیات با Dialog سفارشی (متن طولانی یادداشت به‌درستی نمایش داده می‌شود)."""
+        StepDetailDialog(step, parent=self).exec()
