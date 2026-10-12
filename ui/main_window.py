@@ -125,17 +125,22 @@ except ImportError:
     PERM_MEETING_DELETE = PERM_REPORT_WRITE
 
 DATE_COLUMNS: frozenset = frozenset([
-    "تاریخ ورود", "تاریخ صورتجلسه", "تاریخ قرارداد",
+    "ارسال به نظارت", "ورود به نظارت", "ورود به کارفرما",
+    "تاریخ صورتجلسه", "تاریخ قرارداد",
     "تاریخ ارسال به پیمانکار", "مهلت انجام", "تاریخ بسته شدن", "تاریخ پاسخ پیمانکار",
 ])
 
 HEADER_TO_DB_COL: Dict[str, str] = {
-    "ردیف": "id", "تاریخ ورود": "entry_date",
-    "تاریخ صورتجلسه": "meeting_date", "شماره صورتجلسه": "meeting_number",
+    "ردیف": "id",
+    "ارسال به نظارت": "sent_to_supervision_date",
+    "ورود به نظارت": "supervision_entry_date",
+    "ورود به کارفرما": "entry_date",
+    "تاریخ صورتجلسه": "meeting_date",
+    "شماره صورتجلسه": "meeting_number",
     "کارفرما": "employer", "مشاور": "consultant", "پیمانکار": "contractor",
     "شماره قرارداد": "contract_number", "تاریخ قرارداد": "contract_date",
-    "موضوع": "subject", "دیسیپلین": "discipline", "وضعیت": "status",
-    "اولویت": "priority", "مهلت انجام": "due_date",
+    "موضوع": "subject", "دیسیپلین": "discipline", "محل کار": "location",
+    "وضعیت": "status", "اولویت": "priority", "مهلت انجام": "due_date",
     "تاریخ بسته شدن": "closing_date",
     "تاریخ ارسال به پیمانکار": "sent_to_contractor_date",
     "تاریخ پاسخ پیمانکار": "contractor_response_date",
