@@ -919,7 +919,7 @@ def get_stylesheet(dark_mode: bool = False) -> str:
     Args:
         dark_mode: در صورت True استایل تاریک، در غیر این صورت روشن بازگردانده می‌شود.
     """
-    return DARK_STYLE if dark_mode else LIGHT_STYLE
+    base = DARK_STYLE if dark_mode else LIGHT_STYLE\n    polish = FORM_POLISH_DARK if dark_mode else FORM_POLISH_LIGHT\n    return base + polish
 
 
 def apply_theme(target: Union[QApplication, QWidget], dark_mode: bool = False) -> None:
@@ -936,3 +936,66 @@ def apply_theme(target: Union[QApplication, QWidget], dark_mode: bool = False) -
 
 # ثابت جهت حفظ سازگاری کامل با کدهای پیشین
 STYLE_SHEET = LIGHT_STYLE
+
+# بهبود سراسری فرم‌ها بدون تغییر در منطق یا داده‌های برنامه.
+FORM_POLISH_LIGHT = r"""
+/* ── فرم‌ها: فاصله‌گذاری، خوانایی و تمرکز بصری ── */
+QDialog { border: 1px solid #dbe5ef; }
+QLabel { padding-top: 1px; padding-bottom: 1px; }
+QLineEdit, QComboBox, QDateEdit, QDateTimeEdit, QTimeEdit,
+QTextEdit, QPlainTextEdit, QSpinBox, QDoubleSpinBox {
+    min-height: 30px;
+    padding: 6px 11px;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    background: #ffffff;
+}
+QLineEdit:hover, QComboBox:hover, QDateEdit:hover, QDateTimeEdit:hover,
+QTimeEdit:hover, QTextEdit:hover, QPlainTextEdit:hover,
+QSpinBox:hover, QDoubleSpinBox:hover { border-color: #94a3b8; }
+QLineEdit:focus, QComboBox:focus, QDateEdit:focus, QDateTimeEdit:focus,
+QTimeEdit:focus, QTextEdit:focus, QPlainTextEdit:focus,
+QSpinBox:focus, QDoubleSpinBox:focus {
+    border: 2px solid #00a8d8;
+    background: #fafdff;
+}
+QPushButton { min-height: 30px; padding: 7px 17px; border-radius: 8px; }
+QGroupBox { padding: 18px 12px 12px 12px; border-radius: 10px; }
+QGroupBox::title { padding: 0 8px; }
+QFrame#form_card, QFrame#card, QFrame#content_frame {
+    border-radius: 12px;
+}
+QScrollArea { border: none; background: transparent; }
+QToolTip { padding: 7px 10px; }
+"""
+
+FORM_POLISH_DARK = r"""
+/* ── فرم‌ها: فاصله‌گذاری، خوانایی و تمرکز بصری ── */
+QDialog { border: 1px solid #334155; }
+QLabel { padding-top: 1px; padding-bottom: 1px; }
+QLineEdit, QComboBox, QDateEdit, QDateTimeEdit, QTimeEdit,
+QTextEdit, QPlainTextEdit, QSpinBox, QDoubleSpinBox {
+    min-height: 30px;
+    padding: 6px 11px;
+    border: 1px solid #475569;
+    border-radius: 8px;
+    background: #162032;
+}
+QLineEdit:hover, QComboBox:hover, QDateEdit:hover, QDateTimeEdit:hover,
+QTimeEdit:hover, QTextEdit:hover, QPlainTextEdit:hover,
+QSpinBox:hover, QDoubleSpinBox:hover { border-color: #64748b; }
+QLineEdit:focus, QComboBox:focus, QDateEdit:focus, QDateTimeEdit:focus,
+QTimeEdit:focus, QTextEdit:focus, QPlainTextEdit:focus,
+QSpinBox:focus, QDoubleSpinBox:focus {
+    border: 2px solid #00bfff;
+    background: #1a263c;
+}
+QPushButton { min-height: 30px; padding: 7px 17px; border-radius: 8px; }
+QGroupBox { padding: 18px 12px 12px 12px; border-radius: 10px; }
+QGroupBox::title { padding: 0 8px; }
+QFrame#form_card, QFrame#card, QFrame#content_frame {
+    border-radius: 12px;
+}
+QScrollArea { border: none; background: transparent; }
+QToolTip { padding: 7px 10px; }
+"""
