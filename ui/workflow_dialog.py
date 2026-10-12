@@ -451,45 +451,57 @@ class WorkflowDialog(QDialog):
 
     # ── استایل یکپارچه ──
     _STYLESHEET = """
-        QDialog { background-color: #f8fafc; }
+        QDialog {
+            background-color: #f4f7fb;
+            font-family: 'Vazirmatn', 'Tahoma', Arial, sans-serif;
+        }
         QGroupBox {
-            font-weight: bold; border: 1px solid #cbd5e1;
-            border-radius: 8px; margin-top: 10px; padding-top: 10px;
-            background-color: #fff;
+            font-weight: bold; color: #0f172a;
+            border: 1px solid #d7e1ec; border-radius: 11px;
+            margin-top: 15px; padding: 20px 12px 12px 12px;
+            background-color: #ffffff;
         }
         QGroupBox::title {
             subcontrol-origin: margin; subcontrol-position: top right;
-            padding: 0 8px; color: #0f172a;
+            padding: 0 8px; color: #0369a1; background: #ffffff;
         }
         QTableWidget {
-            border: 1px solid #cbd5e1; border-radius: 8px;
-            gridline-color: #f1f5f9; background-color: #fff;
+            border: 1px solid #d7e1ec; border-radius: 10px;
+            gridline-color: #edf2f7; background-color: #ffffff;
+            alternate-background-color: #f8fafc;
+            selection-background-color: #dbeafe;
+            selection-color: #1e40af; outline: none;
         }
         QHeaderView::section {
             background-color: #1e293b; color: white;
-            padding: 8px; border: none; font-weight: bold;
+            padding: 10px 8px; border: none; font-weight: bold;
         }
-        QTableWidget::item { padding: 6px; }
+        QTableWidget::item { padding: 8px 7px; }
         QTableWidget::item:selected { background-color: #dbeafe; color: #1e40af; }
         QLabel { color: #0f172a; }
         QComboBox {
-            border: 1px solid #cbd5e1; border-radius: 4px;
-            padding: 4px; background-color: white;
+            border: 1px solid #cbd5e1; border-radius: 8px;
+            padding: 6px 9px; min-height: 28px; background-color: #ffffff;
         }
-        QComboBox:focus { border-color: #3b82f6; }
-        QComboBox::drop-down { border: none; width: 20px; }
+        QComboBox:hover { border-color: #94a3b8; }
+        QComboBox:focus { border: 2px solid #3b82f6; }
+        QComboBox::drop-down { border: none; width: 24px; }
         QComboBox QAbstractItemView {
             border: 1px solid #94a3b8; background: #fff;
             selection-background-color: #3b82f6; selection-color: #fff;
         }
+        QPushButton {
+            border-radius: 8px; padding: 7px 14px; min-height: 30px;
+        }
+        QPushButton:focus { border: 2px solid #60a5fa; }
     """
 
     # ── ساختار رابط ──
 
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
-        root.setContentsMargins(14, 14, 14, 12)
-        root.setSpacing(8)
+        root.setContentsMargins(18, 16, 18, 14)
+        root.setSpacing(12)
 
         root.addWidget(self._build_header())
         root.addWidget(self._build_progress_bar())
