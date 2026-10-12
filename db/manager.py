@@ -158,7 +158,7 @@ class DatabaseManager:
             with self.engine.begin() as conn:
                 columns = self._column_names("meetings")
                 if "is_deleted" not in columns:
-                    conn.execute(text("ALTER TABLE meetings ADD COLUMN is_deleted BOOLEAN NOT NULL DEFAULT 0;"))
+                    conn.execute(text("ALTER TABLE meetings ADD COLUMN is_deleted BOOLEAN NOT NULL DEFAULT FALSE;"))
                 if "deleted_at" not in columns:
                     conn.execute(text("ALTER TABLE meetings ADD COLUMN deleted_at DATETIME;"))
                 if "deleted_by" not in columns:
