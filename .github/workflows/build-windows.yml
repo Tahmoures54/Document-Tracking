@@ -1,0 +1,77 @@
+name: Build Windows Executable
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build EXE (Windows)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Build with PyInstaller
+        run: |
+          pyinstaller ^
+            --noconfirm ^
+            --clean ^
+            --windowed ^
+            --name "DocumentTracking" ^
+            --icon app.ico ^
+            --add-data "app.ico;." ^
+            --hidden-import sqlalchemy.dialects.sqlite ^
+            --hidden-import jdatetime ^
+            --hidden-import openpyxl ^
+            --hidden-import pandas ^
+            --hidden-import matplotlib ^
+            --collect-all PyQt6 ^
+            app.py
+        shell: cmd
+
+      - name: Prepare release folder
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist/release | Out-Null
+          Copy-Item dist/DocumentTracking.exe dist/release/ -ErrorAction SilentlyContinue
+          if (Test-Path dist/DocumentTracking) {
+            Copy-Item -Recurse -Force dist/DocumentTracking/* dist/release/
+          }
+          if (Test-Path app.ico) { Copy-Item app.ico dist/release/ }
+          if (Test-Path user_guide.html) { Copy-Item user_guide.html dist/release/ }
+          Get-ChildItem dist/release | Format-Table Name, Length
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: DocumentTracking-Windows
+          path: dist/release/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Create GitHub Release (on tag)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/release/**
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
