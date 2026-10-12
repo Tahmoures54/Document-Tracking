@@ -40,8 +40,6 @@ from PyQt6.QtGui import (
     QPainter,
     QRadialGradient,
     QPalette,
-    QStyle,
-    QStyleOptionViewItem,
 )
 from PyQt6.QtWidgets import (
     QApplication,
@@ -57,6 +55,8 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QProgressDialog,
     QPushButton,
+    QStyle,
+    QStyleOptionViewItem,
     QStyledItemDelegate,
     QTableView,
     QVBoxLayout,
