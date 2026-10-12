@@ -79,6 +79,7 @@ from security.permissions import (
 from security.session import UserSession
 from utils.date_utils import to_gregorian, to_shamsi, today_shamsi
 from services.meeting_number_report import MeetingNumberReportGenerator
+from services.workflow_status import derive_workflow_state
 
 logger = logging.getLogger(__name__)
 
@@ -1538,6 +1539,7 @@ class MainWindow(QMainWindow):
         # ⚡ لود دسته‌ای و بسیار بهینه گردش‌کار تمام سطرها تنها با ۱ کوئری در کل صفحه (سرعت فوق‌العاده بالا)
         meeting_ids = [m.id for m in meetings]
         workflow_map: Dict[int, List[WorkflowStep]] = {}
+        workflow_loaded = True
         try:
             with self.db.session() as sess:
                 steps = sess.query(WorkflowStep).filter(
@@ -1546,6 +1548,7 @@ class MainWindow(QMainWindow):
                 for s in steps:
                     workflow_map.setdefault(s.meeting_id, []).append(s)
         except Exception as exc:
+            workflow_loaded = False
             logger.warning("Failed to bulk fetch workflow steps: %s", exc)
 
         for m in meetings:
@@ -1558,25 +1561,14 @@ class MainWindow(QMainWindow):
             # واکشی گام‌های این سطر مشخص از حافظه موقت
             m_steps = workflow_map.get(m.id, [])
 
-            # وضعیت رنگ ردیف را از زنجیره واقعی گام‌ها محاسبه می‌کنیم.
-            # سبز فقط وقتی مجاز است که همه گام‌ها تکمیل و ابلاغ ثبت شده باشد.
-            if m.status == STATUS_CANCELLED:
-                workflow_states[m.id] = "cancelled"
-            elif not m_steps:
-                workflow_states[m.id] = "pending"
-            elif any(s.status == "rejected" for s in m_steps):
-                workflow_states[m.id] = "returned"
-            elif any(s.status == "in_progress" for s in m_steps):
-                workflow_states[m.id] = "in_progress"
-            elif any(s.status == "pending" for s in m_steps):
-                workflow_states[m.id] = "pending"
-            elif all(s.status == "completed" for s in m_steps):
-                workflow_states[m.id] = (
-                    "completed" if m.sent_to_contractor_date is not None else "pending"
-                )
-            else:
-                # وجود گام skipped یا وضعیت ناشناخته هرگز به‌اشتباه سبز نمی‌شود.
-                workflow_states[m.id] = "unknown"
+            # وضعیت از تابع مستقل استخراج می‌شود تا خطای واکشی DB
+            # به‌اشتباه به صورت «در انتظار بررسی» نشان داده نشود.
+            workflow_states[m.id] = derive_workflow_state(
+                m.status,
+                (step.status for step in m_steps),
+                m.sent_to_contractor_date is not None,
+                workflow_loaded=workflow_loaded,
+            )
 
             # نمایش وضعیت زنده (محاسبه شده از گام‌های واکشی شده)
             if status_index >= 0:
