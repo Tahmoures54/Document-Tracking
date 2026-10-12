@@ -1,12 +1,16 @@
 # Document & MOM Tracking System 3.0.1
 
-## Security & Stability Patch
+## بهبودهای عملیاتی
 
-### Fixed
-- **Password hashing**: Replaced weak SHA-256 with PBKDF2-HMAC-SHA256 (210k iterations). Existing SHA-256 hashes are still accepted and transparently upgraded on next successful login.
-- **Roles consistency**: Aligned role definitions across `config.py`, `db/models.py` and `security/permissions.py` (admin / manager / editor / user / viewer).
-- **Scan path**: `DEFAULT_SCAN_PATH` is now overridable via environment variable `MOM_SCAN_PATH` or QSettings key `scan_path` (helper `get_scan_path()` added).
+### انجام‌شده
+- **هماهنگی نقش‌ها**: نقش‌های `admin / manager / editor / user / viewer` در `config.py` و `db/models.py` یکدست شدند.
+- **مسیر اسکن قابل تنظیم**: می‌توانید مسیر اسکن را با متغیر محیطی `MOM_SCAN_PATH` یا از داخل تنظیمات برنامه تغییر دهید (تابع `get_scan_path()`).
 
-### Notes
-- Default admin remains `admin / admin` on first database creation; password is forced to change.
-- No breaking schema changes; existing databases continue to work.
+### نکته امنیتی و شبکه
+- رمز عبور کاربران برنامه فقط برای کنترل نقش و دسترسی داخل اپلیکیشن است.
+- خود فایل دیتابیس SQLite روی شبکه قرار دارد و دسترسی به آن از طریق مجوزهای پوشه شبکه کنترل می‌شود (رمز جداگانه‌ای روی فایل دیتابیس وجود ندارد).
+- هش رمز عبور همچنان SHA-256 ساده است تا با دیتابیس‌های موجود سازگار بماند و پیچیدگی اضافی ایجاد نشود.
+
+### سازگاری
+- هیچ تغییر ساختاری در جداول دیتابیس ایجاد نشده است.
+- کاربران و داده‌های قبلی بدون مشکل کار می‌کنند.
