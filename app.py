@@ -6,6 +6,8 @@ main
 """
 from __future__ import annotations
 
+from typing import Optional
+
 import logging
 import os
 import sys
@@ -141,7 +143,7 @@ def main() -> int:
 
     # ۶. سیستم مانیتورینگ قفل تک‌نسخه‌ای (Single Instance Monitor) - (۵۰٪)
     splash.message("بررسی اجرای همزمان نرم‌افزار (Single Instance)…", progress=50)
-    lock = QLockFile(os.path.join(db_dir, "app.lock"))
+    lock = QLockFile(os.path.join(db_dir or ".", "app.lock"))
     lock.setStaleLockTime(0)
     if not lock.tryLock(100):
         splash.close()
