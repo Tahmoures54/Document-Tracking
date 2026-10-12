@@ -1115,6 +1115,9 @@ class WorkflowDialog(QDialog):
                     for field, value in meeting_state.items():
                         setattr(meeting, field, value)
                 sess.commit()
+            if meeting_state:
+                for field, value in meeting_state.items():
+                    setattr(self.meeting, field, value)
             self._load_steps()
             self.toast.show_message("تغییر قبلی بازگردانده شد.", color="#64748b")
         except Exception as exc:
@@ -1166,7 +1169,7 @@ class WorkflowDialog(QDialog):
             )
             self._load_steps()
             self.toast.show_message(
-                f"📥 «{step.step_name}» آغاز شد — مسئول: {responsible}",
+                f"📥 «{self._step_label(step)}» آغاز شد — مسئول: {responsible}",
                 color="#3b82f6",
                 undo_callback=lambda: self._apply_snapshot(snap),
             )
@@ -1307,7 +1310,7 @@ class WorkflowDialog(QDialog):
             )
             self._load_steps()
             self.toast.show_message(
-                f"🔄 «{step.step_name}» بازگشایی شد",
+                f"🔄 «{self._step_label(step)}» بازگشایی شد",
                 color="#3b82f6",
                 undo_callback=lambda: self._apply_snapshot(snap),
             )
@@ -1341,7 +1344,7 @@ class WorkflowDialog(QDialog):
         reply = QMessageBox.question(
             self,
             "بازگردانی گام",
-            f"«{step.step_name}» و تمام گام‌های بعدی ریست می‌شوند.\nادامه می‌دهید؟",
+            f"«{self._step_label(step)}» و تمام گام‌های بعدی ریست می‌شوند.\nادامه می‌دهید؟",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
@@ -1352,7 +1355,7 @@ class WorkflowDialog(QDialog):
             self._db_revert_step(step)
             self._load_steps()
             self.toast.show_message(
-                f"↩️ «{step.step_name}» بازگردانی شد", color="#f59e0b"
+                f"↩️ «{self._step_label(step)}» بازگردانی شد", color="#f59e0b"
             )
         except Exception as exc:
             logger.exception("revert failed")
@@ -1394,6 +1397,11 @@ class WorkflowDialog(QDialog):
                     meeting.contractor_response_date = None
                     meeting.status = STATUS_PENDING
             sess.commit()
+            if step.step_order == max((s.step_order for s in self.steps), default=step.step_order):
+                self.meeting.sent_to_contractor_date = None
+                self.meeting.closing_date = None
+                self.meeting.contractor_response_date = None
+                self.meeting.status = STATUS_PENDING
 
     # ── ویرایش یادداشت ──
 
@@ -1406,7 +1414,7 @@ class WorkflowDialog(QDialog):
         notes, ok = QInputDialog.getMultiLineText(
             self,
             "ویرایش یادداشت",
-            f"یادداشت «{step.step_name}»:",
+            f"یادداشت «{self._step_label(step)}»:",
             step.notes or "",
         )
         if not ok:
