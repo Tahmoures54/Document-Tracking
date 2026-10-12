@@ -124,6 +124,7 @@ class DatabaseManager:
         self._migrate_add_discipline()
         self._migrate_add_soft_delete()
         self._migrate_add_tracking_fields()
+        self._migrate_add_location()
 
         # بهینه‌سازی سرعت جستجوها
         self._ensure_indexes()
@@ -174,6 +175,19 @@ class DatabaseManager:
         except Exception as exc:
             logger.warning("Tracking fields migration failed: %s", exc)
 
+
+    def _migrate_add_location(self) -> None:
+        """افزودن ستون محل کار (location) به جدول meetings."""
+        try:
+            with self.engine.begin() as conn:
+                cols = [row[1] for row in conn.execute(text("PRAGMA table_info(meetings);")).fetchall()]
+                if "location" not in cols:
+                    conn.execute(text("ALTER TABLE meetings ADD COLUMN location VARCHAR;"))
+                    logger.info("Migration Applied: Column 'location' added successfully.")
+        except Exception as exc:
+            logger.warning("Migration '_migrate_add_location' failed: %s", exc)
+
+
     def _ensure_indexes(self) -> None:
         """ایجاد ایندکس‌های تخصصی و مرکب جهت افزایش سرعت لود جداول پر حجم."""
         indexes = [
@@ -185,6 +199,7 @@ class DatabaseManager:
             "CREATE INDEX IF NOT EXISTS idx_meetings_subject    ON meetings(subject);",
             "CREATE INDEX IF NOT EXISTS idx_meetings_drawing    ON meetings(drawing_number);",
             "CREATE INDEX IF NOT EXISTS idx_meetings_discipline ON meetings(discipline);",
+            "CREATE INDEX IF NOT EXISTS idx_meetings_location   ON meetings(location);",
             "CREATE INDEX IF NOT EXISTS idx_meetings_deleted    ON meetings(is_deleted);",
             "CREATE INDEX IF NOT EXISTS idx_meetings_sent       ON meetings(sent_to_contractor_date);",
             "CREATE INDEX IF NOT EXISTS idx_audit_ts            ON audit_logs(ts);",
@@ -465,6 +480,7 @@ class DatabaseManager:
             "contractor":              "contractor",
             "subject":                 "subject",
             "discipline":              "discipline",
+            "location":               "location",
             "entry_date":              "entry_date",
             "closing_date":            "closing_date",
             "sent_to_contractor_date": "sent_to_contractor_date",
@@ -476,7 +492,7 @@ class DatabaseManager:
 
         conditions = []
 
-        for k in ("status", "priority", "employer", "contractor", "discipline"):
+        for k in ("status", "priority", "employer", "contractor", "discipline", "location"):
             v = (filters.get(k) or "").strip()
             if v and v != "همه":
                 conditions.append(getattr(Meeting, k) == v)
@@ -493,6 +509,7 @@ class DatabaseManager:
                     Meeting.contractor.like(like),
                     Meeting.consultant.like(like),
                     Meeting.discipline.like(like),
+                    Meeting.location.like(like),
                 )
             )
 
@@ -559,6 +576,7 @@ class DatabaseManager:
                     Meeting.employer.like(like),
                     Meeting.contractor.like(like),
                     Meeting.discipline.like(like),
+                    Meeting.location.like(like),
                 )
             )
 
