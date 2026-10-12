@@ -24,7 +24,8 @@ SAFE_GROUP_COLUMNS = {
     "contractor",
     "drawing_number",
     "contract_number",
-    "discipline",  # ← هماهنگ‌شده با ستون جدید
+    "discipline",
+    "location",  # محل کار
 }
 
 
@@ -104,7 +105,7 @@ def group_by(db: DatabaseManager, col: str, limit: int = 100) -> List[Tuple[str,
     گروه‌بندی صورتجلسات بر اساس یک ستون امن.
 
     Args:
-        col: نام ستون (مثلاً employer / discipline)
+        col: نام ستون (مثلاً employer / discipline / location)
         limit: حداکثر تعداد نتایج
 
     Returns:
