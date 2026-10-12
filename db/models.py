@@ -133,8 +133,9 @@ class Meeting(Base):
         nullable=False,
     )
 
-    # دیسیپلین فنی و وضعیت‌های اجرایی
+    # دیسیپلین فنی، محل کار و وضعیت‌های اجرایی
     discipline = Column(String, index=True)
+    location = Column(String, index=True)  # محل کار
     status = Column(
         String,
         default=STATUS_PENDING,
@@ -184,6 +185,7 @@ class Meeting(Base):
         Index("idx_meeting_due_active", "due_date", "is_deleted", "status"),
         Index("idx_meeting_employer_contractor", "employer", "contractor"),
         Index("idx_meeting_discipline_priority", "discipline", "priority"),
+        Index("idx_meeting_location", "location"),
         Index("idx_meeting_dispatch_status", "sent_to_contractor_date", "status"),
     )
 
@@ -203,6 +205,7 @@ class Meeting(Base):
         "تاریخ قرارداد":            "contract_date",
         "موضوع":                    "subject",
         "دیسیپلین":                 "discipline",
+        "محل کار":                  "location",
         "تاریخ ارسال به پیمانکار":  "sent_to_contractor_date",
         "وضعیت":                    "status",
         "اولویت":                   "priority",
@@ -246,6 +249,7 @@ class Meeting(Base):
             "contract_date":               self.contract_date.isoformat() if self.contract_date else None,
             "subject":                     self.subject,
             "discipline":                  self.discipline,
+            "location":                    self.location,
             "sent_to_contractor_date":     self.sent_to_contractor_date.isoformat() if self.sent_to_contractor_date else None,
             "file_link":                   self.file_link,
             "status":                      self.status,
