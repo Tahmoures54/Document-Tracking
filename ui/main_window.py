@@ -73,18 +73,18 @@ from security.permissions import (
     can,
 )
 from security.session import UserSession
-from services.import_export import ImportWorker
-from ui.chart_dialog import ChartDialog, HAS_MATPLOTLIB
-from ui.login_dialog import LoginDialog
-from ui.meeting_dialog import MeetingDialog
-from ui.user_admin_dialog import UserAdminDialog
-from ui.workflow_dialog import WorkflowDialog
-from ui.operations_dashboard import OperationsDashboard
-from ui.tracking_dialog import TrackingDialog
 from utils.date_utils import to_gregorian, to_shamsi, today_shamsi
 from services.meeting_number_report import MeetingNumberReportGenerator
 
 logger = logging.getLogger(__name__)
+
+def _has_matplotlib() -> bool:
+    try:
+        from ui.chart_dialog import HAS_MATPLOTLIB
+        return bool(HAS_MATPLOTLIB)
+    except Exception:
+        return False
+
 
 # ─────────────────────────────────────────────
 # ثابت‌های UI
@@ -597,17 +597,32 @@ class MainWindow(QMainWindow):
 
     def _update_stats(self) -> None:
         try:
+            from sqlalchemy import case, func as sa_func
+            today = date.today()
             with self.db.session() as s:
-                total = s.query(Meeting).filter(Meeting.is_deleted.is_(False)).count()
-                pending = s.query(Meeting).filter(
-                    Meeting.is_deleted.is_(False),
-                    Meeting.status == STATUS_PENDING,
-                ).count()
-                delayed = s.query(Meeting).filter(
-                    Meeting.is_deleted.is_(False),
-                    Meeting.due_date < date.today(),
-                    Meeting.status.in_(OPEN_STATUSES),
-                ).count()
+                row = (
+                    s.query(
+                        sa_func.count(Meeting.id),
+                        sa_func.sum(
+                            case((Meeting.status == STATUS_PENDING, 1), else_=0)
+                        ),
+                        sa_func.sum(
+                            case(
+                                (
+                                    (Meeting.due_date < today)
+                                    & (Meeting.status.in_(OPEN_STATUSES)),
+                                    1,
+                                ),
+                                else_=0,
+                            )
+                        ),
+                    )
+                    .filter(Meeting.is_deleted.is_(False))
+                    .one()
+                )
+                total = int(row[0] or 0)
+                pending = int(row[1] or 0)
+                delayed = int(row[2] or 0)
         except Exception:
             logger.exception("Stats update failed")
             total = pending = delayed = 0
@@ -1631,7 +1646,9 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "دسترسی غیرمجاز", "اجازه ایجاد صورتجلسه ندارید.")
             return
 
+        from ui.meeting_dialog import MeetingDialog
         dlg = MeetingDialog(self.db, self)
+        from ui.meeting_dialog import MeetingDialog
         if dlg.exec() == MeetingDialog.DialogCode.Accepted:
             try:
                 m = self.db.create_meeting(dlg.get_data())
@@ -1668,7 +1685,9 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "خطا", "رکورد یافت نشد.")
             return
 
+        from ui.meeting_dialog import MeetingDialog
         dlg = MeetingDialog(self.db, self, meeting=m)
+        from ui.meeting_dialog import MeetingDialog
         if dlg.exec() == MeetingDialog.DialogCode.Accepted:
             try:
                 self.db.update_meeting(m.id, dlg.get_data())
@@ -1736,6 +1755,7 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "خطا", str(exc))
             return
 
+        from ui.workflow_dialog import WorkflowDialog
         WorkflowDialog(self.db, m, self).exec()
         self._apply_live_status(m.id)
         self.reload_page()
@@ -1753,12 +1773,14 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "خطا", "صورتجلسه یافت نشد.")
             return
 
+        from ui.tracking_dialog import TrackingDialog
         TrackingDialog(self.db, m, self.session.username, self).exec()
         self._apply_live_status(m.id)
         self.reload_meta()
         self.reload_page()
 
     def open_operational_dashboard(self) -> None:
+        from ui.operations_dashboard import OperationsDashboard
         OperationsDashboard(self.db, self).exec()
         self.reload_meta()
         self.reload_page()
@@ -1777,7 +1799,9 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "خطا", str(exc))
             return
 
+        from ui.login_dialog import LoginDialog
         login = LoginDialog(new_db, self)
+        from ui.login_dialog import LoginDialog
         if login.exec() != LoginDialog.DialogCode.Accepted or not login.session:
             return
 
@@ -1856,6 +1880,7 @@ class MainWindow(QMainWindow):
         self._import_progress.setMinimumDuration(200)
         self._import_progress.setValue(0)
 
+        from services.import_export import ImportWorker
         worker = ImportWorker(self.db, path)
         worker.signals.progress.connect(self._import_progress.setValue)
         worker.signals.error.connect(lambda m: QMessageBox.critical(self, "خطا", m))
@@ -2026,12 +2051,14 @@ class MainWindow(QMainWindow):
         if not can(self.session, PERM_USER_ADMIN):
             QMessageBox.warning(self, "دسترسی غیرمجاز", "اجازه ندارید.")
             return
+        from ui.user_admin_dialog import UserAdminDialog
         UserAdminDialog(self.db, self).exec()
 
     def open_dashboard(self) -> None:
-        if not HAS_MATPLOTLIB:
+        if not _has_matplotlib():
             QMessageBox.critical(self, "خطا", "matplotlib نصب نیست.")
             return
+        from ui.chart_dialog import ChartDialog
         ChartDialog(
             self.db.status_priority_counts(self._get_filters(), self.search.text().strip()),
             "وضعیت و اولویت",
