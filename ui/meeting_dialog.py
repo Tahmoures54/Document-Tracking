@@ -2,7 +2,9 @@
 """
 ui.meeting_dialog
 ماژول دیالوگ ثبت/ویرایش صورتجلسه
-نسخه ۵: نوار پیشرفت گرادیانی + پیشنهاد خودکار مهلت انجام (۳ روز بعد) + Toast بصری
+نسخه ۵.۱: نوار پیشرفت گرادیانی + پیشنهاد هوشمند مهلت انجام (۳ روز بعد) + Toast بصری
+(بهسازی: جلوگیری از بازنویسی مهلت انجام دستی، debounce progress،
+ اعتبارسنجی تاریخ با dynamic property، تم مرکزی، ممیزی با کاربر واقعی)
 """
 from __future__ import annotations
 
@@ -17,7 +19,7 @@ from PyQt6.QtCore import (
     QTimer,
     Qt,
 )
-from PyQt6.QtGui import QColor, QFont, QKeySequence, QShortcut
+from PyQt6.QtGui import QFont, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -47,6 +49,18 @@ logger = logging.getLogger(__name__)
 # ─────────────────────────────────────────────
 # ثابت‌های ماژول
 # ─────────────────────────────────────────────
+DEFAULT_PRIORITY = "متوسط"
+UNDO_TIMEOUT_MS = 6_000
+PROGRESS_DEBOUNCE_MS = 120
+AUTO_FILL_DUE_DAYS = 3
+
+# پالت رنگ — تنها منبع حقیقت در این ماژول
+COLOR_SUCCESS = "#10b981"
+COLOR_DANGER = "#ef4444"
+COLOR_WARNING = "#f59e0b"
+COLOR_INFO = "#3b82f6"
+COLOR_NEUTRAL = "#64748b"
+COLOR_NOTE = "#6366f1"
 
 REQUIRED_FIELDS: Dict[str, str] = {
     "meeting_number": "شماره صورتجلسه",
@@ -99,9 +113,6 @@ SMART_COPY_FIELDS = {
     "drawing_number",
     "priority",
 }
-
-DEFAULT_PRIORITY = "متوسط"
-UNDO_TIMEOUT_MS = 6_000
 
 
 def _normalize_document_number(value: str) -> str:
@@ -201,7 +212,7 @@ class _Toast(QFrame):
         self,
         text: str,
         *,
-        color: str = "#10b981",
+        color: str = COLOR_SUCCESS,
         duration_ms: int = 3500,
         undo_callback=None,
         undo_duration_ms: int = UNDO_TIMEOUT_MS,
@@ -310,6 +321,11 @@ class MeetingDialog(QDialog):
         self._fields: Dict[str, QWidget] = {}
         self._prev_snapshot: Optional[Dict[str, Any]] = None
 
+        # پرچم‌ها برای جلوگیری از رفتارهای ناخواسته
+        self._is_loading: bool = False           # در حال بارگذاری داده اولیه
+        self._due_date_dirty: bool = False       # کاربر دستی مهلت انجام را ویرایش کرده
+        self._due_date_auto_value: Optional[str] = None  # آخرین مقداری که auto-fill گذاشته
+
         self.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
         self.setWindowTitle(
             "ثبت صورتجلسه جدید"
@@ -319,14 +335,24 @@ class MeetingDialog(QDialog):
         self.resize(780, 660)
         self.setMinimumSize(640, 520)
 
+        # Debounce برای محاسبه پیشرفت
+        self._progress_timer = QTimer(self)
+        self._progress_timer.setSingleShot(True)
+        self._progress_timer.setInterval(PROGRESS_DEBOUNCE_MS)
+        self._progress_timer.timeout.connect(self._update_progress)
+
         self._build_ui()
         self._apply_style()
         self._populate_combos()
 
-        if meeting:
-            self._load_meeting()
-        else:
-            self._set_field_value("priority", DEFAULT_PRIORITY)
+        self._is_loading = True
+        try:
+            if meeting:
+                self._load_meeting()
+            else:
+                self._set_field_value("priority", DEFAULT_PRIORITY)
+        finally:
+            self._is_loading = False
 
         self._connect_signals()
         self._setup_shortcuts()
@@ -440,15 +466,9 @@ class MeetingDialog(QDialog):
         # ── تاریخ‌ها ──
         self._add_date_row("meeting_date", "تاریخ صورتجلسه", required=True)
         self._add_date_row("contract_date", "تاریخ قرارداد")
-        self._add_date_row(
-            "sent_to_supervision_date", "ارسال به نظارت"
-        )
-        self._add_date_row(
-            "supervision_entry_date", "ورود به دفتر نظارت"
-        )
-        self._add_date_row(
-            "sent_to_contractor_date", "ابلاغ به پیمانکار"
-        )
+        self._add_date_row("sent_to_supervision_date", "ارسال به نظارت")
+        self._add_date_row("supervision_entry_date", "ورود به دفتر نظارت")
+        self._add_date_row("sent_to_contractor_date", "ابلاغ به پیمانکار")
         self._add_date_row("due_date", "مهلت انجام", required=True)
 
         # ── کمبوها ──
@@ -505,7 +525,7 @@ class MeetingDialog(QDialog):
 
         info = QLabel("🔎 فایل فیزیکی توسط سیستم به‌طور خودکار شناسایی می‌شود.")
         info.setStyleSheet(
-            "color: #64748b; font-size: 11px; font-style: italic;"
+            f"color: {COLOR_NEUTRAL}; font-size: 11px; font-style: italic;"
         )
         h.addWidget(self.spin_attachment_count)
         h.addWidget(info, stretch=1)
@@ -595,7 +615,7 @@ class MeetingDialog(QDialog):
         widget = self._fields.get(key)
         if isinstance(widget, QLineEdit):
             widget.setText(today_shamsi())
-            self._update_progress()
+            self._schedule_progress_update()
 
     # ── سیگنال و میانبر ──
 
@@ -604,18 +624,23 @@ class MeetingDialog(QDialog):
         self.btn_cancel.clicked.connect(self.reject)
         self.btn_copy_prev.clicked.connect(self._copy_previous_data)
 
-        for widget in self._fields.values():
+        for key, widget in self._fields.items():
             if isinstance(widget, QLineEdit):
-                widget.textChanged.connect(self._update_progress)
+                widget.textChanged.connect(self._schedule_progress_update)
             elif isinstance(widget, QComboBox):
-                widget.currentTextChanged.connect(self._update_progress)
+                widget.currentTextChanged.connect(self._schedule_progress_update)
             elif isinstance(widget, QSpinBox):
-                widget.valueChanged.connect(self._update_progress)
+                widget.valueChanged.connect(self._schedule_progress_update)
 
-        # اتصال سیگنال تاریخ صورتجلسه برای پیشنهاد هوشمند مهلت انجام
+        # پیشنهاد هوشمند مهلت انجام
         m_date_widget = self._fields.get("meeting_date")
         if isinstance(m_date_widget, QLineEdit):
             m_date_widget.textChanged.connect(self._on_meeting_date_changed)
+
+        # ردیابی ویرایش دستی due_date — فقط از طریق textEdited (نه setText برنامه‌ای)
+        due_widget = self._fields.get("due_date")
+        if isinstance(due_widget, QLineEdit):
+            due_widget.textEdited.connect(self._on_due_date_edited)
 
     def _setup_shortcuts(self) -> None:
         QShortcut(QKeySequence("Ctrl+S"), self, activated=self._on_save)
@@ -629,7 +654,7 @@ class MeetingDialog(QDialog):
         )
 
     def _install_live_validators(self) -> None:
-        """اعتبارسنجی رنگی زنده فیلدهای تاریخ."""
+        """اعتبارسنجی رنگی زنده فیلدهای تاریخ با dynamic property."""
         for key in DATE_FIELDS:
             w = self._fields.get(key)
             if isinstance(w, QLineEdit):
@@ -639,56 +664,104 @@ class MeetingDialog(QDialog):
         self._update_progress()
 
     def _paint_date_field(self, key: str) -> None:
+        """
+        اعتبارسنجی زنده با dynamic property به‌جای setStyleSheet مستقیم.
+        این روش قواعد استایل والد (focus/hover/disable) را از بین نمی‌برد.
+        """
         w = self._fields.get(key)
         if not isinstance(w, QLineEdit):
             return
         val = w.text().strip()
         if not val:
-            w.setStyleSheet("")
-            return
-        if _is_valid_shamsi(val):
-            w.setStyleSheet(
-                "border: 1px solid #10b981; background: #ecfdf5;"
-            )
+            state = ""
+        elif _is_valid_shamsi(val):
+            state = "ok"
         else:
-            w.setStyleSheet(
-                "border: 1px solid #ef4444; background: #fef2f2;"
-            )
+            state = "err"
 
-    # ── 🎯 پیشنهاد خودکار ۳ روز بعد برای مهلت انجام ──
+        if w.property("dateState") == state:
+            return  # تغییری در وضعیت نیست
+        w.setProperty("dateState", state)
+        # اعمال مجدد stylesheet سراسری روی این ویجت
+        w.style().unpolish(w)
+        w.style().polish(w)
+        w.update()
+
+    # ── 🎯 پیشنهاد هوشمند مهلت انجام (بدون بازنویسی ویرایش دستی) ──
 
     def _add_days_to_shamsi(self, shamsi_str: str, days: int) -> Optional[str]:
-        """افزودن تعداد روز مشخص به یک تاریخ شمسی به روش استاندارد میلادی."""
+        """افزودن تعداد روز مشخص به یک تاریخ شمسی."""
         if not _is_valid_shamsi(shamsi_str):
             return None
         try:
             greg_str = to_gregorian(shamsi_str)
             if not greg_str:
                 return None
-            greg_date = datetime.strptime(greg_str, "%Y-%m-%d").date()
+            greg_date = date.fromisoformat(greg_str)
             new_greg_date = greg_date + timedelta(days=days)
             return to_shamsi(new_greg_date.isoformat())
         except Exception as exc:
             logger.warning("Failed to add days to Shamsi date: %s", exc)
             return None
 
+    def _on_due_date_edited(self, _text: str) -> None:
+        """فقط با ویرایش دستی کاربر فعال می‌شود (نه setText برنامه‌ای)."""
+        self._due_date_dirty = True
+
     def _on_meeting_date_changed(self) -> None:
-        """وقتی تاریخ صورتجلسه تایپ شد یا تغییر کرد، مهلت انجام را ۳ روز بعد پیشنهاد بدهد."""
+        """
+        اگر تاریخ صورتجلسه معتبر شد، مهلت انجام را ۳ روز بعد پیشنهاد بده —
+        اما فقط اگر:
+          ۱) کاربر مهلت را دستی ویرایش نکرده باشد، یا
+          ۲) مقدار فعلی همان پیشنهاد خودکار قبلی باشد.
+        """
+        if self._is_loading:
+            return
+
         m_date_widget = self._fields.get("meeting_date")
         if not isinstance(m_date_widget, QLineEdit):
             return
         m_date_str = m_date_widget.text().strip()
 
-        if _is_valid_shamsi(m_date_str):
-            suggested_due = self._add_days_to_shamsi(m_date_str, 3)
-            if suggested_due:
-                due_widget = self._fields.get("due_date")
-                if isinstance(due_widget, QLineEdit):
-                    # همواره پیشنهاد جدید را جایگزین فیلد می‌کند تا زمانی که کاربر مایل به اصلاح آن باشد
-                    due_widget.setText(suggested_due)
-                    self._paint_date_field("due_date")
+        if not _is_valid_shamsi(m_date_str):
+            return
+
+        suggested_due = self._add_days_to_shamsi(m_date_str, AUTO_FILL_DUE_DAYS)
+        if not suggested_due:
+            return
+
+        due_widget = self._fields.get("due_date")
+        if not isinstance(due_widget, QLineEdit):
+            return
+
+        current = due_widget.text().strip()
+
+        # شرط بازنویسی: نه dirty، یا مقدار فعلی همان پیشنهاد قبلی
+        can_overwrite = (
+            not self._due_date_dirty
+            or current == (self._due_date_auto_value or "")
+            or not current
+        )
+        if not can_overwrite:
+            return
+
+        # با blockSignals از بازگشت مجدد _on_meeting_date_changed جلوگیری می‌کنیم
+        due_widget.blockSignals(True)
+        try:
+            due_widget.setText(suggested_due)
+        finally:
+            due_widget.blockSignals(False)
+        self._due_date_auto_value = suggested_due
+        self._paint_date_field("due_date")
+        self._schedule_progress_update()
 
     # ── محاسبه و نمایش نوار پیشرفت ──
+
+    def _schedule_progress_update(self, *args) -> None:
+        """Debounce: چند تغییر سریع فقط یک بار محاسبه می‌شود."""
+        if self._is_loading:
+            return
+        self._progress_timer.start()
 
     def _update_progress(self) -> None:
         """محاسبه درصد تکمیل فرم بر اساس فیلدهای پر شده و اعتبارسنجی."""
@@ -732,7 +805,7 @@ class MeetingDialog(QDialog):
             self.btn_save.setEnabled(False)
         elif percent >= 100:
             state = "full"
-            fmt = f"✨ فرم کامل است — آماده ذخیره (%p٪)"
+            fmt = "✨ فرم کامل است — آماده ذخیره (%p٪)"
             self.btn_save.setEnabled(True)
         else:
             state = "ok"
@@ -793,6 +866,7 @@ class MeetingDialog(QDialog):
             "contract_number": m.contract_number or "",
             "discipline": m.discipline or "",
             "priority": m.priority or DEFAULT_PRIORITY,
+            "location": m.location or "",
         }
         for key in DATE_FIELDS:
             raw = getattr(m, key, None)
@@ -801,11 +875,22 @@ class MeetingDialog(QDialog):
         for key, val in text_values.items():
             self._set_field_value(key, val)
 
+        # اگر پرونده مهلت انجام ذخیره‌شده دارد، آن را «dirty» علامت‌گذاری کن
+        # تا پیشنهاد خودکار، آن را در حین ویرایش بازنویسی نکند.
+        if m.due_date:
+            self._due_date_dirty = True
+            self._due_date_auto_value = None
+
         attach = getattr(m, "attachment_count", None) or 0
         try:
             self.spin_attachment_count.setValue(int(attach))
         except (TypeError, ValueError):
             self.spin_attachment_count.setValue(0)
+
+        # پیش‌رنگ اعتبارسنجی و progress
+        for key in DATE_FIELDS:
+            self._paint_date_field(key)
+        self._update_progress()
 
     def _set_field_value(self, key: str, value: Any) -> None:
         widget = self._fields.get(key)
@@ -829,13 +914,23 @@ class MeetingDialog(QDialog):
     # ── کپی هوشمند + Undo ──
 
     def _snapshot_current_form(self) -> Dict[str, Any]:
-        return self._collect_form_data()
+        snap = self._collect_form_data()
+        # اطلاعات پرچم‌ها را هم نگه می‌داریم
+        snap["__flags__"] = {
+            "due_date_dirty": self._due_date_dirty,
+            "due_date_auto_value": self._due_date_auto_value,
+        }
+        return snap
 
     def _restore_snapshot(self, snap: Dict[str, Any]) -> None:
+        flags = snap.pop("__flags__", None)
         for k, v in snap.items():
             self._set_field_value(k, v)
+        if flags:
+            self._due_date_dirty = flags.get("due_date_dirty", False)
+            self._due_date_auto_value = flags.get("due_date_auto_value")
         self._update_progress()
-        self.toast.show_message("↩️ فرم به حالت قبل بازگشت", color="#6366f1")
+        self.toast.show_message("↩️ فرم به حالت قبل بازگشت", color=COLOR_NOTE)
 
     def _get_previous_meeting(self) -> Optional[Meeting]:
         try:
@@ -860,7 +955,7 @@ class MeetingDialog(QDialog):
         prev = self._get_previous_meeting()
         if not prev:
             self.toast.show_message(
-                "هیچ صورتجلسه قبلی یافت نشد", color="#f59e0b"
+                "هیچ صورتجلسه قبلی یافت نشد", color=COLOR_WARNING
             )
             return
 
@@ -897,7 +992,7 @@ class MeetingDialog(QDialog):
 
         self.toast.show_message(
             msg,
-            color="#3b82f6",
+            color=COLOR_INFO,
             undo_callback=lambda: self._restore_snapshot(snapshot),
         )
 
@@ -946,7 +1041,7 @@ class MeetingDialog(QDialog):
                 label = REQUIRED_FIELDS.get(key, key)
                 return f"تبدیل تاریخ «{label}» به میلادی ناموفق بود."
             try:
-                data[key] = datetime.strptime(greg, "%Y-%m-%d").date()
+                data[key] = date.fromisoformat(greg)
             except ValueError:
                 return f"تاریخ نامعتبر: {greg}"
         return None
@@ -995,27 +1090,27 @@ class MeetingDialog(QDialog):
             ):
                 err = validator(data)
                 if err:
-                    self.toast.show_message(f"⚠️ {err}", color="#f59e0b")
+                    self.toast.show_message(f"⚠️ {err}", color=COLOR_WARNING)
                     return
 
             err = self._convert_dates(data)
             if err:
-                self.toast.show_message(f"⚠️ {err}", color="#f59e0b")
+                self.toast.show_message(f"⚠️ {err}", color=COLOR_WARNING)
                 return
 
             err = self._validate_date_logic(data)
             if err:
-                self.toast.show_message(f"⚠️ {err}", color="#f59e0b")
+                self.toast.show_message(f"⚠️ {err}", color=COLOR_WARNING)
                 return
 
             if self._validate_duplicate(data["meeting_number"]):
                 self.toast.show_message(
                     f"❌ شماره «{data['meeting_number']}» قبلاً ثبت شده",
-                    color="#ef4444",
+                    color=COLOR_DANGER,
                 )
                 return
 
-            # ── هشدار شباهت (احتمال تکرار / تقلب پیمانکار) ──
+            # ── هشدار شباهت ──
             if not self._confirm_no_duplicate_work(data):
                 return
 
@@ -1031,11 +1126,13 @@ class MeetingDialog(QDialog):
             data["file_link"] = (
                 self.meeting.file_link if self.meeting else None
             )
-            # entry_date = ورود به کارفرما؛ فقط اگر خالی بود برای رکورد جدید پر شود
+
+            # entry_date = تاریخ ورود به کارفرما
             if self.meeting and self.meeting.entry_date:
                 data["entry_date"] = self.meeting.entry_date
-            elif not data.get("entry_date"):
+            else:
                 data["entry_date"] = date.today()
+
             data["status"] = (
                 self.meeting.status if self.meeting else "در دست بررسی"
             )
@@ -1054,6 +1151,13 @@ class MeetingDialog(QDialog):
             QMessageBox.critical(
                 self, "خطای مهلک", f"خطای داخلی:\n{exc}"
             )
+
+    def _get_audit_username(self) -> tuple:
+        """دریافت (user_id, username) واقعی از parent/session به‌جای هاردکد."""
+        ps = getattr(self.parent(), "session", None)
+        if ps is not None:
+            return getattr(ps, "user_id", None), getattr(ps, "username", "system")
+        return None, "system"
 
     def _confirm_no_duplicate_work(self, data: Dict[str, Any]) -> bool:
         """
@@ -1106,12 +1210,13 @@ class MeetingDialog(QDialog):
         if reply != QMessageBox.StandardButton.Ok:
             return False
 
-        # ثبت در ممیزی که کاربر با وجود هشدار ادامه داده
+        # ثبت در ممیزی با کاربر واقعی
         try:
+            uid, uname = self._get_audit_username()
             nums = ", ".join(m.meeting_number for m in similar[:5])
             self.db.audit(
-                None,
-                "user",
+                uid,
+                uname,
                 "SIMILARITY_OVERRIDE",
                 f"new={data.get('meeting_number')} similar=[{nums}] "
                 f"contractor={data.get('contractor')} location={data.get('location')} "
@@ -1135,130 +1240,108 @@ class MeetingDialog(QDialog):
 
     def _apply_style(self) -> None:
         self.setStyleSheet(
-            """
-            QDialog {
+            f"""
+            QDialog {{
                 background-color: #f4f6fb;
                 font-family: 'Vazirmatn', 'Tahoma', Arial, sans-serif;
-            }
-            QLabel#header_title {
-                font-size: 15px;
+            }}
+            QLabel#header_title {{
+                font-size: 17px;
                 font-weight: bold;
-                color: #1a5276;
-            }
-            QLineEdit, QComboBox, QSpinBox {
-                border: 1px solid #c5cae9;
-                border-radius: 6px;
-                padding: 4px 10px;
-                background: #ffffff;
-                font-size: 12.5px;
-                color: #1e293b;
-                selection-background-color: #b3d4f5;
-            }
-            QLineEdit:focus, QComboBox:focus, QSpinBox:focus {
-                border-color: #00BFFF;
-                background: #f0fbff;
-            }
-            QLineEdit:read-only {
-                background: #f1f3f6;
-                color: #555;
-            }
-            QSpinBox {
-                font-weight: bold;
-                color: #0369a1;
-            }
-            QLabel {
+                color: #075985;
+                padding: 3px 0 7px 0;
+            }}
+            QLabel {{
                 color: #374151;
                 font-size: 12.5px;
-            }
-            QPushButton {
-                background-color: #ffffff;
-                border: 1px solid #c5cae9;
-                border-radius: 6px;
-                padding: 6px 18px;
-                font-size: 12.5px;
-                font-weight: bold;
-                color: #1e293b;
-                min-height: 30px;
-            }
-            QPushButton:hover   { background-color: #e8eaf6; }
-            QPushButton:pressed { background-color: #c5cae9; }
-            QPushButton:disabled {
-                background: #f1f5f9;
-                color: #94a3b8;
-                border-color: #e2e8f0;
-            }
-            QPushButton#btn_save {
-                background-color: #00BFFF;
-                color: #ffffff;
-                border: none;
-            }
-            QPushButton#btn_save:hover   { background-color: #0099CC; }
-            QPushButton#btn_save:pressed { background-color: #007AAA; }
-            QPushButton#btn_save:disabled {
-                background: #cbd5e1;
-                color: #ffffff;
-            }
-            QPushButton#btn_cancel { color: #555; }
-            QPushButton#btn_secondary {
-                background-color: #f8fafc;
-                border-color: #94a3b8;
-                color: #334155;
-                font-weight: normal;
-            }
-            QPushButton#btn_secondary:hover { background-color: #e2e8f0; }
-            QToolButton {
-                background-color: #f0f4f8;
-                border: 1px solid #c5cae9;
-                border-radius: 5px;
-                padding: 3px 8px;
-                font-size: 12px;
-                color: #334155;
-            }
-            QToolButton:hover   { background-color: #dce4f0; }
-            QToolButton:pressed { background-color: #c5cae9; }
-            QScrollArea { border: none; background: transparent; }
-            QScrollBar:vertical {
-                background: #f1f5f9; width: 8px; border-radius: 4px;
-            }
-            QScrollBar::handle:vertical {
-                background: #94a3b8; border-radius: 4px;
-            }
-            QScrollBar::handle:vertical:hover { background: #64748b; }
-
-            /* ریزتنظیم فرم ثبت صورتجلسه */
-            QLineEdit, QComboBox, QSpinBox {
+            }}
+            QLineEdit, QComboBox, QSpinBox {{
                 min-height: 34px;
                 padding: 6px 12px;
                 border: 1px solid #cbd5e1;
                 border-radius: 9px;
                 background-color: #ffffff;
-            }
-            QLineEdit:hover, QComboBox:hover, QSpinBox:hover {
+                font-size: 12.5px;
+                color: #1e293b;
+                selection-background-color: #b3d4f5;
+            }}
+            QLineEdit:hover, QComboBox:hover, QSpinBox:hover {{
                 border-color: #94a3b8;
-            }
-            QLineEdit:focus, QComboBox:focus, QSpinBox:focus {
+            }}
+            QLineEdit:focus, QComboBox:focus, QSpinBox:focus {{
                 border: 2px solid #00a8d8;
                 background-color: #fafdff;
-            }
-            QLabel#header_title {
-                font-size: 17px;
-                padding: 3px 0 7px 0;
-                color: #075985;
-            }
-            QPushButton {
-                min-height: 34px;
-                padding: 7px 19px;
-                border-radius: 9px;
-            }
-            QPushButton#btn_save {
-                background-color: #009fce;
+            }}
+            QLineEdit:read-only {{
+                background: #f1f3f6;
+                color: #555;
+            }}
+            QLineEdit[dateState="ok"] {{
+                border: 1px solid {COLOR_SUCCESS};
+                background: #ecfdf5;
+            }}
+            QLineEdit[dateState="err"] {{
+                border: 1px solid {COLOR_DANGER};
+                background: #fef2f2;
+            }}
+            QSpinBox {{
                 font-weight: bold;
-            }
-            QPushButton#btn_save:hover { background-color: #007fa8; }
-            QToolButton {
+                color: #0369a1;
+            }}
+            QPushButton {{
+                background-color: #ffffff;
+                border: 1px solid #c5cae9;
+                border-radius: 9px;
+                padding: 7px 19px;
+                font-size: 12.5px;
+                font-weight: bold;
+                color: #1e293b;
+                min-height: 34px;
+            }}
+            QPushButton:hover   {{ background-color: #e8eaf6; }}
+            QPushButton:pressed {{ background-color: #c5cae9; }}
+            QPushButton:disabled {{
+                background: #f1f5f9;
+                color: #94a3b8;
+                border-color: #e2e8f0;
+            }}
+            QPushButton#btn_save {{
+                background-color: #009fce;
+                color: #ffffff;
+                border: none;
+                font-weight: bold;
+            }}
+            QPushButton#btn_save:hover   {{ background-color: #007fa8; }}
+            QPushButton#btn_save:pressed {{ background-color: #006a8f; }}
+            QPushButton#btn_save:disabled {{
+                background: #cbd5e1;
+                color: #ffffff;
+            }}
+            QPushButton#btn_cancel {{ color: #555; }}
+            QPushButton#btn_secondary {{
+                background-color: #f8fafc;
+                border-color: #94a3b8;
+                color: #334155;
+                font-weight: normal;
+            }}
+            QPushButton#btn_secondary:hover {{ background-color: #e2e8f0; }}
+            QToolButton {{
+                background-color: #f0f4f8;
+                border: 1px solid #c5cae9;
                 border-radius: 8px;
                 padding: 5px 9px;
-            }
-            QScrollBar::handle:vertical { min-height: 28px; }
-            """
+                font-size: 12px;
+                color: #334155;
+            }}
+            QToolButton:hover   {{ background-color: #dce4f0; }}
+            QToolButton:pressed {{ background-color: #c5cae9; }}
+            QScrollArea {{ border: none; background: transparent; }}
+            QScrollBar:vertical {{
+                background: #f1f5f9; width: 8px; border-radius: 4px;
+            }}
+            QScrollBar::handle:vertical {{
+                background: #94a3b8; border-radius: 4px; min-height: 28px;
+            }}
+            QScrollBar::handle:vertical:hover {{ background: #64748b; }}
+        """
         )
