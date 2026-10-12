@@ -1,10 +1,14 @@
 name: Build Windows Executable
 
 on:
-  workflow_dispatch:
+  # اجرای خودکار ساخت فایل اجرایی پس از هر تغییر روی شاخه اصلی
   push:
+    branches:
+      - main
     tags:
       - "v*"
+  # امکان اجرای دستی از زبانه Actions همچنان حفظ می‌شود
+  workflow_dispatch:
 
 permissions:
   contents: write
