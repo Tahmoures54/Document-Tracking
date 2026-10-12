@@ -655,6 +655,8 @@ class DatabaseManager:
             "drawing_number",
             "contract_number",
             "discipline",
+            "meeting_number",
+            "location",
         }
         if column not in safe:
             raise ValueError(f"Unsafe column: {column}")
