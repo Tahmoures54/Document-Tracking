@@ -2,8 +2,7 @@
 """
 ui.meeting_dialog
 ماژول دیالوگ ثبت/ویرایش صورتجلسه
-نسخه ۵.۱: نوار پیشرفت گرادیانی + پیشنهاد خودکار مهلت انجام (۳ روز بعد) + Toast بصری
-           + رفع مشکل تغییر مقدار کامبوباکس/اسپین‌باکس با چرخ غربیلک ماوس
+نسخه ۵: نوار پیشرفت گرادیانی + پیشنهاد خودکار مهلت انجام (۳ روز بعد) + Toast بصری
 """
 from __future__ import annotations
 
@@ -69,6 +68,8 @@ PROGRESS_FIELDS: Dict[str, int] = {
     "contract_number": 1,
     "contract_date": 1,
     "drawing_number": 1,
+    "sent_to_supervision_date": 1,
+    "supervision_entry_date": 1,
     "sent_to_contractor_date": 1,
     "priority": 1,
     "attachment_count": 1,
@@ -77,6 +78,8 @@ PROGRESS_FIELDS: Dict[str, int] = {
 DATE_FIELDS: List[str] = [
     "meeting_date",
     "contract_date",
+    "sent_to_supervision_date",
+    "supervision_entry_date",
     "sent_to_contractor_date",
     "due_date",
 ]
@@ -151,31 +154,6 @@ def _is_valid_shamsi(text: str) -> bool:
         is_leap = (y % 33) in {1, 5, 9, 13, 17, 22, 26, 30}
         return 1 <= d <= (30 if is_leap else 29)
     return False
-
-
-# ═══════════════════════════════════════════════
-#  ویجت‌های سفارشی: جلوگیری از تغییر مقدار با چرخ ماوس
-# ═══════════════════════════════════════════════
-
-
-class NoScrollComboBox(QComboBox):
-    """QComboBox که فقط با چرخ ماوس وقتی فوکوس دارد تغییر می‌کند."""
-
-    def wheelEvent(self, event):  # noqa: N802
-        if self.hasFocus():
-            super().wheelEvent(event)
-        else:
-            event.ignore()
-
-
-class NoScrollSpinBox(QSpinBox):
-    """QSpinBox که فقط با چرخ ماوس وقتی فوکوس دارد تغییر می‌کند."""
-
-    def wheelEvent(self, event):  # noqa: N802
-        if self.hasFocus():
-            super().wheelEvent(event)
-        else:
-            event.ignore()
 
 
 # ═══════════════════════════════════════════════
@@ -463,7 +441,13 @@ class MeetingDialog(QDialog):
         self._add_date_row("meeting_date", "تاریخ صورتجلسه", required=True)
         self._add_date_row("contract_date", "تاریخ قرارداد")
         self._add_date_row(
-            "sent_to_contractor_date", "تاریخ ارسال به پیمانکار"
+            "sent_to_supervision_date", "ارسال به نظارت"
+        )
+        self._add_date_row(
+            "supervision_entry_date", "ورود به دفتر نظارت"
+        )
+        self._add_date_row(
+            "sent_to_contractor_date", "ابلاغ به پیمانکار"
         )
         self._add_date_row("due_date", "مهلت انجام", required=True)
 
@@ -511,8 +495,7 @@ class MeetingDialog(QDialog):
         h.setContentsMargins(0, 0, 0, 0)
         h.setSpacing(8)
 
-        # ← استفاده از NoScrollSpinBox
-        self.spin_attachment_count = NoScrollSpinBox()
+        self.spin_attachment_count = QSpinBox()
         self.spin_attachment_count.setRange(0, 999)
         self.spin_attachment_count.setValue(0)
         self.spin_attachment_count.setMinimumHeight(30)
@@ -597,8 +580,7 @@ class MeetingDialog(QDialog):
     def _add_combo(
         self, key: str, label: str, items: Optional[List[str]] = None
     ) -> QComboBox:
-        # ← استفاده از NoScrollComboBox
-        combo = NoScrollComboBox()
+        combo = QComboBox()
         combo.setEditable(True)
         combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
         combo.setMinimumHeight(30)
