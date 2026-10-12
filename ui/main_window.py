@@ -39,6 +39,9 @@ from PyQt6.QtGui import (
     QKeySequence,
     QPainter,
     QRadialGradient,
+    QPalette,
+    QStyle,
+    QStyleOptionViewItem,
 )
 from PyQt6.QtWidgets import (
     QApplication,
@@ -54,6 +57,7 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QProgressDialog,
     QPushButton,
+    QStyledItemDelegate,
     QTableView,
     QVBoxLayout,
     QWidget,
@@ -445,6 +449,46 @@ class MeetingsPageModel(QAbstractTableModel):
             return None
 
 
+class StatusRowDelegate(QStyledItemDelegate):
+    """رسم صریح پس‌زمینه تمام سلول‌های ردیف بر اساس وضعیت پرونده."""
+
+    def paint(self, painter, option, index) -> None:
+        opt = QStyleOptionViewItem(option)
+        self.initStyleOption(opt, index)
+
+        bg = index.data(Qt.ItemDataRole.BackgroundRole)
+        if isinstance(bg, QBrush):
+            bg_color = bg.color()
+        elif isinstance(bg, QColor):
+            bg_color = bg
+        else:
+            bg_color = QColor("#FFFFFF")
+
+        selected = bool(opt.state & QStyle.StateFlag.State_Selected)
+        # پس‌زمینه را خود delegate رسم می‌کند تا استایل عمومی برنامه نتواند
+        # رنگ وضعیت را با رنگ سفید/هاور جایگزین کند.
+        painter.save()
+        painter.fillRect(opt.rect, QColor("#BAE6FD") if selected else bg_color)
+        painter.restore()
+
+        # جلوگیری از نقاشی دوباره پس‌زمینه توسط QStyle؛ متن و آیکون‌ها
+        # همچنان با موتور استاندارد Qt و تنظیمات مدل رسم می‌شوند.
+        opt.backgroundBrush = QBrush()
+        opt.state &= ~QStyle.StateFlag.State_Selected
+        opt.palette.setColor(
+            QPalette.ColorRole.Text,
+            QColor("#0C4A6E") if selected else (
+                index.data(Qt.ItemDataRole.ForegroundRole).color()
+                if isinstance(index.data(Qt.ItemDataRole.ForegroundRole), QBrush)
+                else QColor("#1E293B")
+            ),
+        )
+        opt.palette.setColor(QPalette.ColorRole.Highlight, QColor("#BAE6FD"))
+        opt.palette.setColor(QPalette.ColorRole.HighlightedText, QColor("#0C4A6E"))
+        style = opt.widget.style() if opt.widget is not None else QApplication.style()
+        style.drawControl(QStyle.ControlElement.CE_ItemViewItem, opt, painter, opt.widget)
+
+
 # ─────────────────────────────────────────────
 # Main Window
 # ─────────────────────────────────────────────
@@ -718,6 +762,7 @@ class MainWindow(QMainWindow):
 
         body_layout.addLayout(self._build_filters_and_actions())
         body_layout.addLayout(self._build_search_bar())
+        body_layout.addWidget(self._build_status_legend())
         body_layout.addWidget(self._build_table(), stretch=1)
         body_layout.addLayout(self._build_pager())
 
@@ -893,15 +938,49 @@ class MainWindow(QMainWindow):
         bar.addWidget(self.search, stretch=1)
         return bar
 
+    def _build_status_legend(self) -> QWidget:
+        """راهنمای دائمی رنگ‌ها؛ رنگ تنها نشانه وضعیت نباشد."""
+        legend = QWidget()
+        legend.setObjectName("status_legend")
+        layout = QHBoxLayout(legend)
+        layout.setContentsMargins(10, 5, 10, 5)
+        layout.setSpacing(8)
+
+        title = QLabel("راهنمای وضعیت:")
+        title.setObjectName("legend_title")
+        layout.addWidget(title)
+
+        items = [
+            ("در حال انجام", "#DBEAFE", "#1D4ED8"),
+            ("در انتظار", "#FEF3C7", "#92400E"),
+            ("برگشت برای اصلاح", "#FFE4E6", "#9F1239"),
+            ("تکمیل و ابلاغ‌شده", "#D1FAE5", "#166534"),
+            ("لغوشده / نامشخص", "#F3F4F6", "#4B5563"),
+        ]
+        for label, bg, fg in items:
+            chip = QLabel(f"●  {label}")
+            chip.setObjectName("status_legend_item")
+            chip.setStyleSheet(
+                f"QLabel#status_legend_item {{ background:{bg}; color:{fg}; "
+                "border:1px solid rgba(100,116,139,0.28); border-radius:9px; "
+                "padding:4px 9px; font-weight:600; }}"
+            )
+            layout.addWidget(chip)
+        layout.addStretch(1)
+        return legend
+
     def _build_table(self) -> QTableView:
         self.view = QTableView()
+        self.view.setObjectName("meetings_table")
         self.view.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
-        # ردیف‌ها بر اساس وضعیت سند رنگ می‌گیرند؛ رنگ متناوب با این منطق تداخل دارد.
+        # هر سلول رنگ وضعیت را از مدل می‌گیرد و delegate آن را صریح رسم می‌کند.
         self.view.setAlternatingRowColors(False)
         self.view.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
         self.view.setSelectionMode(QTableView.SelectionMode.ExtendedSelection)
         self.view.setSortingEnabled(False)
         self.view.setWordWrap(False)
+        self.view.setShowGrid(False)
+        self.view.setMouseTracking(True)
         self.view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.view.customContextMenuRequested.connect(self._show_table_context_menu)
 
@@ -920,11 +999,12 @@ class MainWindow(QMainWindow):
         hdr.setDefaultAlignment(Qt.AlignmentFlag.AlignCenter)
         hdr.sectionClicked.connect(self._on_header_clicked)
 
-        self.view.verticalHeader().setDefaultSectionSize(26)
+        self.view.verticalHeader().setDefaultSectionSize(34)
         self.view.verticalHeader().setVisible(False)
 
         self.model = MeetingsPageModel()
         self.view.setModel(self.model)
+        self.view.setItemDelegate(StatusRowDelegate(self.view))
         self.view.doubleClicked.connect(self.edit_selected)
         return self.view
 
@@ -1044,16 +1124,44 @@ class MainWindow(QMainWindow):
         self.setStyleSheet(f"""
             {menu_style}
             QMainWindow {{ background:{bg_m}; }}
-            QTableView {{
+            QTableView#meetings_table {{
+                background:{bg_t};
+                alternate-background-color:{bg_a};
                 border: 1px solid {brd};
-                border-radius:6px;
-                color:{tf}; selection-background-color:{sb};
-                selection-color:{sfg}; gridline-color:{brd}; font-size:12px;
+                border-radius:10px;
+                color:{tf};
+                selection-background-color:#BAE6FD;
+                selection-color:#0C4A6E;
+                gridline-color:transparent;
+                font-size:12.5px;
+                outline:0;
+            }}
+            QTableView#meetings_table::item {{
+                padding:7px 9px;
+                border-bottom:1px solid rgba(148,163,184,0.18);
+            }}
+            QTableView#meetings_table::item:hover {{
+                border-bottom:1px solid #38BDF8;
             }}
             QHeaderView::section {{
-                background:{bg_h}; color:{fg_h};
-                border:1px solid {brd}; padding:5px;
-                font-weight:bold; font-size:12px;
+                background:qlineargradient(x1:0,y1:0,x2:0,y2:1,stop:0 #0E7490,stop:1 #155E75);
+                color:#FFFFFF;
+                border:none;
+                border-left:1px solid rgba(255,255,255,0.18);
+                border-bottom:3px solid #22D3EE;
+                padding:9px 7px;
+                font-weight:bold;
+                font-size:12px;
+            }}
+            QWidget#status_legend {{
+                background:{bg_t};
+                border:1px solid {brd};
+                border-radius:9px;
+            }}
+            QLabel#legend_title {{
+                color:{sf};
+                font-weight:bold;
+                padding:2px 5px;
             }}
             QLineEdit, QComboBox {{
                 border:1px solid {brd}; border-radius:5px;
