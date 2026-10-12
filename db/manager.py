@@ -15,7 +15,7 @@ import sqlite3
 from datetime import date, datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
-from sqlalchemy import asc, and_, case, create_engine, desc, func, inspect, or_, text
+from sqlalchemy import asc, and_, case, create_engine, desc, event, func, inspect, or_, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, selectinload, sessionmaker
 
@@ -81,11 +81,27 @@ class DatabaseManager:
             normalized_path = self.db_path.replace(os.sep, "/")
             database_url = f"sqlite:///{normalized_path}"
             connect_args = {"timeout": 20, "check_same_thread": False}
-        self.engine = create_engine(
-            database_url, future=True, echo=False,
-            pool_pre_ping=not database_url.startswith("sqlite:"),
-            connect_args=connect_args,
-        )
+        if database_url.startswith("sqlite:"):
+            connect_args["timeout"] = 30
+            self.engine = create_engine(
+                database_url, future=True, echo=False, connect_args=connect_args,
+            )
+
+            @event.listens_for(self.engine, "connect")
+            def _configure_sqlite_connection(dbapi_connection, connection_record):
+                """هر اتصال SQLite با تنظیمات مناسب فایل محلی/اشتراکی باز شود."""
+                cursor = dbapi_connection.cursor()
+                try:
+                    cursor.execute("PRAGMA foreign_keys=ON")
+                    cursor.execute("PRAGMA busy_timeout=30000")
+                    cursor.execute("PRAGMA synchronous=NORMAL")
+                finally:
+                    cursor.close()
+        else:
+            self.engine = create_engine(
+                database_url, future=True, echo=False, pool_pre_ping=True,
+                connect_args=connect_args,
+            )
         self.SessionLocal = sessionmaker(
             bind=self.engine,
             autoflush=False,
@@ -114,10 +130,11 @@ class DatabaseManager:
             try:
                 with self.engine.begin() as conn:
                     conn.execute(text("PRAGMA foreign_keys=ON;"))
-                    # WAL برای دیتابیس محلی است؛ فایل SQLite شبکه‌ای برای چند کلاینت توصیه نمی‌شود.
-                    conn.execute(text("PRAGMA journal_mode=WAL;"))
+                    # DELETE journal از فایل‌های جانبی WAL پرهیز می‌کند و با پوشه اشتراکی سازگارتر است.
+                    # SQLite شبکه‌ای همچنان برای نوشتن هم‌زمان زیاد مناسب نیست.
+                    conn.execute(text("PRAGMA journal_mode=DELETE;"))
                     conn.execute(text("PRAGMA synchronous=NORMAL;"))
-                    conn.execute(text("PRAGMA busy_timeout=8000;"))
+                    conn.execute(text("PRAGMA busy_timeout=30000;"))
                     conn.execute(text("PRAGMA temp_store=MEMORY;"))
                     conn.execute(text("PRAGMA cache_size=-20000;"))
             except Exception as exc:
