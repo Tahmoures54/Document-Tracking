@@ -11,6 +11,9 @@ def test_database_manager_initializes_local_sqlite(tmp_path):
     db = DatabaseManager(str(database_file))
     try:
         assert db.engine.dialect.name == "sqlite"
+        with db.engine.connect() as connection:
+            assert connection.exec_driver_sql("PRAGMA journal_mode").scalar().lower() == "delete"
+            assert connection.exec_driver_sql("PRAGMA busy_timeout").scalar() == 30000
         with db.session() as session:
             admin = session.query(User).filter_by(username="admin").one()
             assert admin.is_active is True
