@@ -18,7 +18,7 @@ from typing import List, Optional, Set, Tuple
 ORG_NAME = "Document & MOM Tracking System"
 APP_NAME = "Document & MOM Tracking System"
 APP_TITLE_FA = "سامانه جامع مدیریت و پیگیری صورتجلسات و اسناد"
-APP_VERSION = "3.0.1"
+APP_VERSION = "3.0.2"
 
 LOG_FILENAME = "app.log"
 DB_FILENAME = "meetings.db"
@@ -28,8 +28,6 @@ BACKUP_PREFIX = "backup_meetings"
 # ─────────────────────────────────────────────
 # تنظیمات اسکن شبکه و فایل‌های مدارک
 # ─────────────────────────────────────────────
-# مسیر پیش‌فرض شبکه؛ قابل بازنویسی از طریق متغیر محیطی MOM_SCAN_PATH
-# یا تنظیمات QSettings با کلید "scan_path"
 _DEFAULT_SCAN = r"\\192.168.200.6\technical office\_MOM\_Scan"
 DEFAULT_SCAN_PATH = os.environ.get("MOM_SCAN_PATH", _DEFAULT_SCAN).strip() or _DEFAULT_SCAN
 
@@ -63,7 +61,8 @@ def get_scan_path() -> str:
 # ─────────────────────────────────────────────
 # تنظیمات صفحه‌بندی و کنترل‌های UI
 # ─────────────────────────────────────────────
-DEFAULT_PAGE_SIZE = 500
+# اندازه پیش‌فرض صفحه: ۱۰۰ (قبلاً ۵۰۰) — بارگذاری و رندر جدول سریع‌تر
+DEFAULT_PAGE_SIZE = 100
 PAGE_SIZE_OPTIONS: List[int] = [25, 50, 100, 250, 500]
 
 SEARCH_DEBOUNCE_MS = 300
@@ -86,20 +85,17 @@ DATETIME_LOG_FORMAT = "%Y-%m-%d %H:%M:%S"
 # ─────────────────────────────────────────────
 class Roles(Enum):
     """نقش‌های کاربری در سطح سامانه."""
-    ADMIN = "admin"        # مدیر ارشد سامانه (دسترسی کامل)
-    MANAGER = "manager"    # مدیر پروژه / واحد
-    EDITOR = "editor"      # کارشناس / ویرایشگر صورتجلسات
-    USER = "user"          # کاربر استاندارد
-    VIEWER = "viewer"      # مشاهده‌گر صرف (فقط خواندنی)
+    ADMIN = "admin"
+    MANAGER = "manager"
+    EDITOR = "editor"
+    USER = "user"
+    VIEWER = "viewer"
 
     def __str__(self) -> str:
         return self.value
 
     @classmethod
     def from_string(cls, role_str: str, default: Optional["Roles"] = None) -> "Roles":
-        """
-        تبدیل امن رشته به عضو Enum با امکان تعیین مقدار پیش‌فرض در صورت خطا.
-        """
         fallback = default if default is not None else cls.VIEWER
         if not role_str:
             return fallback
@@ -111,12 +107,10 @@ class Roles(Enum):
 
     @classmethod
     def values(cls) -> List[str]:
-        """لیست مقادیر رشته‌ای تمام نقش‌ها."""
         return [role.value for role in cls]
 
     @classmethod
     def display_names(cls) -> List[Tuple[str, str]]:
-        """لیست تاپل‌های (عنوان فارسی، مقدار شناسه) جهت استفاده در کمبوباکس‌ها."""
         mapping = {
             cls.ADMIN: "مدیر سیستم (دسترسی کامل)",
             cls.MANAGER: "مدیر پروژه / واحد",
@@ -127,38 +121,27 @@ class Roles(Enum):
         return [(mapping.get(role, role.value), role.value) for role in cls]
 
 
-# ─────────────────────────────────────────────
-# توابع استاندارد مسیردهی (Path Utilities)
-# ─────────────────────────────────────────────
 def get_app_dir() -> Path:
-    """
-    دریافت مسیر ریشه برنامه.
-    سازگار با حالت اجرایی معمولی و بسته‌بندی‌شده (PyInstaller Frozen).
-    """
     if getattr(sys, "frozen", False):
         return Path(sys.executable).resolve().parent
     return Path(__file__).resolve().parent
 
 
 def get_log_dir() -> Path:
-    """دریافت و ایجاد خودکار پوشه لاگ‌ها."""
     log_dir = get_app_dir() / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
     return log_dir
 
 
 def get_attachments_dir() -> Path:
-    """دریافت و ایجاد خودکار پوشه ذخیره‌سازی پیوست‌ها."""
     att_dir = get_app_dir() / "attachments"
     att_dir.mkdir(parents=True, exist_ok=True)
     return att_dir
 
 
 def get_default_db_path() -> Path:
-    """دریافت مسیر کامل فایل پیش‌فرض دیتابیس SQLite."""
     return get_app_dir() / DB_FILENAME
 
 
 def get_default_db_path_str() -> str:
-    """دریافت مسیر رشته‌ای فایل پیش‌فرض دیتابیس (جهت سازگاری با توابع C/Qt)."""
     return str(get_default_db_path())
