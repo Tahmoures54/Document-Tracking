@@ -54,7 +54,7 @@ from PyQt6.QtWidgets import (
 
 from config import APP_NAME, ORG_NAME
 from db.manager import DatabaseManager
-from db.models import Meeting, WorkflowStep
+from db.models import Meeting, WorkflowStep, STATUS_PENDING
 from security.permissions import PERM_REPORT_READ, PERM_REPORT_WRITE, can
 from services.workflow_report import WorkflowReportGenerator
 from utils.date_utils import to_shamsi, today_shamsi
@@ -1077,7 +1077,15 @@ class WorkflowDialog(QDialog):
     # ══════════════════════════════════════
 
     def _snapshot_step(self, step: WorkflowStep) -> Dict[str, Any]:
-        """عکس فوری از وضعیت قبلی گام — برای Undo."""
+        """عکس فوری از گام و وضعیت ابلاغ پرونده برای Undo."""
+        with self.db.session() as sess:
+            meeting = sess.get(Meeting, self.meeting.id)
+            meeting_state = {
+                "sent_to_contractor_date": meeting.sent_to_contractor_date,
+                "closing_date": meeting.closing_date,
+                "contractor_response_date": meeting.contractor_response_date,
+                "status": meeting.status,
+            } if meeting else None
         return {
             "id": step.id,
             "entry_date": step.entry_date,
@@ -1086,21 +1094,29 @@ class WorkflowDialog(QDialog):
             "signature": step.signature,
             "status": step.status,
             "notes": step.notes,
+            "meeting_state": meeting_state,
         }
 
     def _apply_snapshot(self, snap: Dict[str, Any]) -> None:
-        """بازگرداندن گام به عکس فوری ذخیره‌شده."""
+        """بازگرداندن گام و وضعیت پرونده به عکس فوری ذخیره‌شده."""
         try:
-            self.db.update_workflow_step(
-                step_id=snap["id"],
-                entry_date=snap["entry_date"],
-                exit_date=snap["exit_date"],
-                responsible_person=snap["responsible_person"],
-                signature=snap["signature"],
-                status=snap["status"],
-                notes=snap["notes"],
-            )
+            with self.db.session() as sess:
+                db_step = sess.get(WorkflowStep, snap["id"])
+                if not db_step:
+                    raise RuntimeError("گام یافت نشد")
+                for field in (
+                    "entry_date", "exit_date", "responsible_person",
+                    "signature", "status", "notes",
+                ):
+                    setattr(db_step, field, snap[field])
+                meeting_state = snap.get("meeting_state")
+                meeting = sess.get(Meeting, self.meeting.id)
+                if meeting and meeting_state:
+                    for field, value in meeting_state.items():
+                        setattr(meeting, field, value)
+                sess.commit()
             self._load_steps()
+            self.toast.show_message("تغییر قبلی بازگردانده شد.", color="#64748b")
         except Exception as exc:
             logger.exception("Undo failed")
             self.toast.show_message(f"خطا در بازگردانی: {exc}", color="#ef4444")
@@ -1174,15 +1190,30 @@ class WorkflowDialog(QDialog):
 
         snap = self._snapshot_step(step)
         try:
-            self.db.update_workflow_step(
-                step_id=step.id,
-                exit_date=date.today(),
-                signature=self.current_user,
-                status="completed",
-            )
+            with self.db.session() as sess:
+                db_step = sess.get(WorkflowStep, step.id)
+                if not db_step:
+                    raise RuntimeError("مرحله در پایگاه داده یافت نشد.")
+                db_step.exit_date = date.today()
+                db_step.signature = self.current_user
+                db_step.status = "completed"
+
+                # تکمیل آخرین مرحله، ابلاغ رسمی و بستن پرونده را نیز ثبت می‌کند.
+                if step.step_order == max((s.step_order for s in self.steps), default=step.step_order):
+                    db_meeting = sess.get(Meeting, self.meeting.id)
+                    if db_meeting:
+                        db_meeting.set_dispatched_to_contractor(date.today())
+                sess.commit()
+
+            if step.step_order == max((s.step_order for s in self.steps), default=step.step_order):
+                self.meeting.set_dispatched_to_contractor(date.today())
+                message = f"✅ «{self._step_label(step)}» تکمیل شد؛ ابلاغ ثبت و پرونده بسته شد."
+            else:
+                message = f"✅ «{self._step_label(step)}» تکمیل و امضا شد."
+
             self._load_steps()
             self.toast.show_message(
-                f"✅ «{step.step_name}» تکمیل و امضا شد",
+                message,
                 color="#10b981",
                 undo_callback=lambda: self._apply_snapshot(snap),
             )
@@ -1354,6 +1385,14 @@ class WorkflowDialog(QDialog):
                 db_step.entry_date = None
                 db_step.exit_date = None
                 db_step.signature = None
+
+            if step.step_order == max((s.step_order for s in self.steps), default=step.step_order):
+                meeting = sess.get(Meeting, self.meeting.id)
+                if meeting:
+                    meeting.sent_to_contractor_date = None
+                    meeting.closing_date = None
+                    meeting.contractor_response_date = None
+                    meeting.status = STATUS_PENDING
             sess.commit()
 
     # ── ویرایش یادداشت ──
