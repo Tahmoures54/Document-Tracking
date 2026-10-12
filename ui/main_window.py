@@ -946,8 +946,8 @@ class MainWindow(QMainWindow):
         legend = QWidget()
         legend.setObjectName("status_legend")
         layout = QHBoxLayout(legend)
-        layout.setContentsMargins(10, 5, 10, 5)
-        layout.setSpacing(8)
+        layout.setContentsMargins(12, 7, 12, 7)
+        layout.setSpacing(10)
 
         title = QLabel("راهنمای وضعیت:")
         title.setObjectName("legend_title")
@@ -965,8 +965,8 @@ class MainWindow(QMainWindow):
             chip.setObjectName("status_legend_item")
             chip.setStyleSheet(
                 f"QLabel#status_legend_item {{ background:{bg}; color:{fg}; "
-                "border:1px solid rgba(100,116,139,0.28); border-radius:9px; "
-                "padding:4px 9px; font-weight:600; }}"
+                "border:1px solid rgba(100,116,139,0.28); border-radius:10px; "
+                "padding:5px 10px; font-weight:600; }}"
             )
             layout.addWidget(chip)
         layout.addStretch(1)
@@ -1002,7 +1002,7 @@ class MainWindow(QMainWindow):
         hdr.setDefaultAlignment(Qt.AlignmentFlag.AlignCenter)
         hdr.sectionClicked.connect(self._on_header_clicked)
 
-        self.view.verticalHeader().setDefaultSectionSize(34)
+        self.view.verticalHeader().setDefaultSectionSize(38)
         self.view.verticalHeader().setVisible(False)
 
         self.model = MeetingsPageModel()
@@ -1140,7 +1140,7 @@ class MainWindow(QMainWindow):
                 outline:0;
             }}
             QTableView#meetings_table::item {{
-                padding:7px 9px;
+                padding:8px 10px;
                 border-bottom:1px solid rgba(148,163,184,0.18);
             }}
             QTableView#meetings_table::item:hover {{
@@ -1152,7 +1152,7 @@ class MainWindow(QMainWindow):
                 border:none;
                 border-left:1px solid rgba(255,255,255,0.18);
                 border-bottom:3px solid #22D3EE;
-                padding:9px 7px;
+                padding:10px 8px;
                 font-weight:bold;
                 font-size:12px;
             }}
@@ -1167,8 +1167,8 @@ class MainWindow(QMainWindow):
                 padding:2px 5px;
             }}
             QLineEdit, QComboBox {{
-                border:1px solid {brd}; border-radius:5px;
-                padding:4px 10px; background:{inp};
+                border:1px solid {brd}; border-radius:7px;
+                padding:5px 10px; background:{inp};
                 color:{fg_m}; font-size:12.5px; min-height:26px;
             }}
             QLineEdit:focus, QComboBox:focus {{
