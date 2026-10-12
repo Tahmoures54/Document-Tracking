@@ -101,12 +101,7 @@ pip install -r requirements.txt
 python app.py
 ```
 
-مسیر دیتابیس سفارشی:
-
-```bash
-python app.py --db "\\SERVER\share\meetings.db"
-```
-
+برای دیتابیس مشترک شبکه، طبق بخش «دیتابیس مشترک شبکه (چندکاربره)» از URL اتصال PostgreSQL با گزینه `--db-url` استفاده کنید. مسیر فایل SQLite فقط برای دیتابیس محلی است.
 ---
 
 ## ساخت فایل اجرایی (EXE)
