@@ -519,14 +519,14 @@ class User(Base):
     is_active = Column(
         Boolean,
         default=True,
-        server_default="1",
+        server_default=text("true"),
         nullable=False,
         index=True,
     )
     must_change_password = Column(
         Boolean,
         default=False,
-        server_default="0",
+        server_default=text("false"),
         nullable=False,
     )
 
