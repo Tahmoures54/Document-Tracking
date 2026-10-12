@@ -300,6 +300,9 @@ class MeetingsPageModel(QAbstractTableModel):
         self._orig_headers: List[str] = Meeting.headers()
         self.headers: List[str] = ["#"] + self._orig_headers + ["کارشناس رسیدگی‌کننده", "مرحله جاری"]
         self.rows: List[List[Any]] = []
+        # وضعیت واقعی گردش‌کار، جدا از وضعیت عمومی پرونده نگهداری می‌شود.
+        # کلیدها شناسه پرونده‌اند تا هیچ ستون داخلی به جدول نمایشی اضافه نشود.
+        self.workflow_states: Dict[int, str] = {}
 
         self._col_status = self._find("وضعیت")
         self._col_due = self._find("مهلت انجام")
@@ -374,6 +377,17 @@ class MeetingsPageModel(QAbstractTableModel):
         self.rows = rows
         self.endResetModel()
 
+    def set_workflow_states(self, states: Dict[int, str]) -> None:
+        """تنظیم وضعیت واقعی گردش‌کار برای رنگ‌بندی ردیف‌ها."""
+        self.workflow_states = dict(states)
+        if self.rows:
+            left = self.index(0, 0)
+            right = self.index(len(self.rows) - 1, max(0, self.columnCount() - 1))
+            self.dataChanged.emit(
+                left, right,
+                [Qt.ItemDataRole.BackgroundRole, Qt.ItemDataRole.ForegroundRole],
+            )
+
     def _cell(self, r: int, c: int) -> Any:
         try:
             return self.rows[r][c]
@@ -382,6 +396,21 @@ class MeetingsPageModel(QAbstractTableModel):
 
     def _color(self, row: int, role: int) -> Optional[QBrush]:
         is_bg = role == Qt.ItemDataRole.BackgroundRole
+
+        # رنگ ردیف از وضعیت واقعی گام‌ها می‌آید؛ تاریخ ابلاغ به‌تنهایی سبز نمی‌شود.
+        meeting_id = self.get_row_id(row)
+        workflow_state = self.workflow_states.get(meeting_id) if meeting_id is not None else None
+        workflow_colors = {
+            "completed": (QColor("#DCFCE7"), QColor("#166534")),
+            "in_progress": (QColor("#DBEAFE"), QColor("#1D4ED8")),
+            "pending": (QColor("#FEF3C7"), QColor("#92400E")),
+            "returned": (QColor("#FEE2E2"), QColor("#991B1B")),
+            "cancelled": (QColor("#F3F4F6"), QColor("#4B5563")),
+            "unknown": (QColor("#F3F4F6"), QColor("#374151")),
+        }
+        colors = workflow_colors.get(workflow_state or "")
+        if colors:
+            return QBrush(colors[0] if is_bg else self._DEFAULT_FG)
 
         if self._col_status >= 0:
             v = self._cell(row, self._col_status)
@@ -1390,8 +1419,10 @@ class MainWindow(QMainWindow):
         date_indices = [i for i, h in enumerate(hdrs) if h in DATE_COLUMNS]
         status_index = hdrs.index("وضعیت") if "وضعیت" in hdrs else -1
         result: List[List[Any]] = []
+        workflow_states: Dict[int, str] = {}
 
         if not meetings:
+            self.model.set_workflow_states(workflow_states)
             return result
 
         # ⚡ لود دسته‌ای و بسیار بهینه گردش‌کار تمام سطرها تنها با ۱ کوئری در کل صفحه (سرعت فوق‌العاده بالا)
@@ -1417,6 +1448,24 @@ class MainWindow(QMainWindow):
             # واکشی گام‌های این سطر مشخص از حافظه موقت
             m_steps = workflow_map.get(m.id, [])
 
+            # وضعیت رنگ ردیف را از زنجیره واقعی گام‌ها محاسبه می‌کنیم.
+            # سبز فقط وقتی مجاز است که همه گام‌ها تکمیل و ابلاغ ثبت شده باشد.
+            if not m_steps:
+                workflow_states[m.id] = "pending"
+            elif any(s.status == "rejected" for s in m_steps):
+                workflow_states[m.id] = "returned"
+            elif any(s.status == "in_progress" for s in m_steps):
+                workflow_states[m.id] = "in_progress"
+            elif any(s.status == "pending" for s in m_steps):
+                workflow_states[m.id] = "pending"
+            elif all(s.status == "completed" for s in m_steps):
+                workflow_states[m.id] = (
+                    "completed" if m.sent_to_contractor_date is not None else "pending"
+                )
+            else:
+                # وجود گام skipped یا وضعیت ناشناخته هرگز به‌اشتباه سبز نمی‌شود.
+                workflow_states[m.id] = "unknown"
+
             # نمایش وضعیت زنده (محاسبه شده از گام‌های واکشی شده)
             if status_index >= 0:
                 live_status = self._compute_live_status_from_steps(m, m_steps)
@@ -1428,6 +1477,7 @@ class MainWindow(QMainWindow):
             row.append(stage or "—")
             result.append(row)
 
+        self.model.set_workflow_states(workflow_states)
         return result
 
     def _resolve_workflow_step_from_list(self, meeting: Meeting, steps: List[WorkflowStep]) -> Tuple[str, str]:
