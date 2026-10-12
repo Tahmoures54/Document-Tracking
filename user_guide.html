@@ -1,0 +1,1022 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>راهنمای کامل Document & MOM Tracking System</title>
+<style>
+  :root {
+    --primary: #00BFFF;
+    --primary-dark: #0099CC;
+    --dark: #1a1a2e;
+    --bg: #f0f2f5;
+    --card: #ffffff;
+    --text: #1e293b;
+    --muted: #64748b;
+    --border: #e2e8f0;
+    --success: #22c55e;
+    --warning: #f59e0b;
+    --danger: #ef4444;
+    --info: #3b82f6;
+    --turquoise: #0a9396;
+    --returned: #f97316;
+  }
+
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+
+  body {
+    font-family: 'Vazirmatn', 'Segoe UI', Tahoma, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.8;
+    padding: 20px;
+  }
+
+  .container {
+    max-width: 1200px;
+    margin: 0 auto;
+  }
+
+  /* هدر */
+  .header {
+    background: linear-gradient(135deg, #005f73 0%, #0a9396 40%, #00ADB5 80%, #3a0ca3 100%);
+    color: white;
+    border-radius: 16px;
+    padding: 30px 40px;
+    margin-bottom: 30px;
+    box-shadow: 0 8px 30px rgba(0,0,0,0.15);
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .header::before {
+    content: '';
+    position: absolute;
+    top: -50%;
+    left: -20%;
+    width: 70%;
+    height: 200%;
+    background: rgba(255,255,255,0.05);
+    transform: rotate(15deg);
+  }
+
+  .header h1 {
+    font-size: 2.2rem;
+    font-weight: 900;
+    letter-spacing: 1px;
+    margin-bottom: 10px;
+    position: relative;
+    z-index: 1;
+  }
+
+  .header p {
+    font-size: 1.1rem;
+    opacity: 0.95;
+    position: relative;
+    z-index: 1;
+  }
+
+  .version {
+    display: inline-block;
+    background: rgba(255,255,255,0.2);
+    padding: 6px 18px;
+    border-radius: 30px;
+    font-size: 0.9rem;
+    margin-top: 15px;
+    position: relative;
+    z-index: 1;
+    backdrop-filter: blur(5px);
+  }
+
+  /* کارت‌ها */
+  .section {
+    background: var(--card);
+    border-radius: 14px;
+    padding: 28px;
+    margin-bottom: 24px;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.04);
+    border: 1px solid var(--border);
+  }
+
+  .section h2 {
+    font-size: 1.6rem;
+    font-weight: 800;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 18px;
+    padding-bottom: 12px;
+    border-bottom: 2px solid var(--primary);
+    color: var(--dark);
+  }
+
+  .section h2 .emoji {
+    font-size: 1.9rem;
+  }
+
+  .section h3 {
+    font-size: 1.2rem;
+    font-weight: 700;
+    margin-top: 20px;
+    margin-bottom: 8px;
+    color: var(--primary-dark);
+  }
+
+  .section p {
+    margin: 8px 0;
+    color: var(--text);
+  }
+
+  .section ul, .section ol {
+    padding-right: 24px;
+    margin: 10px 0;
+  }
+
+  .section li {
+    margin-bottom: 8px;
+  }
+
+  /* جداول */
+  .table-wrapper {
+    overflow-x: auto;
+    margin: 15px 0;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.95rem;
+  }
+
+  th, td {
+    padding: 12px 14px;
+    text-align: right;
+    border: 1px solid var(--border);
+  }
+
+  th {
+    background: #f8fafc;
+    font-weight: 700;
+    color: var(--dark);
+  }
+
+  tr:nth-child(even) {
+    background: #f9fafb;
+  }
+
+  /* جعبه اطلاعات */
+  .info-box {
+    background: #f0f9ff;
+    border-right: 4px solid var(--info);
+    padding: 14px 18px;
+    border-radius: 8px;
+    margin: 15px 0;
+  }
+
+  .success-box {
+    background: #f0fdf4;
+    border-right: 4px solid var(--success);
+    padding: 14px 18px;
+    border-radius: 8px;
+    margin: 15px 0;
+  }
+
+  .warning-box {
+    background: #fffbeb;
+    border-right: 4px solid var(--warning);
+    padding: 14px 18px;
+    border-radius: 8px;
+    margin: 15px 0;
+  }
+
+  .danger-box {
+    background: #fef2f2;
+    border-right: 4px solid var(--danger);
+    padding: 14px 18px;
+    border-radius: 8px;
+    margin: 15px 0;
+  }
+
+  .info-box strong, .success-box strong, .warning-box strong, .danger-box strong {
+    display: block;
+    margin-bottom: 4px;
+  }
+
+  /* بج وضعیت */
+  .status-badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin: 15px 0;
+  }
+
+  .badge {
+    display: inline-block;
+    padding: 6px 14px;
+    border-radius: 20px;
+    font-weight: bold;
+    font-size: 0.9rem;
+    border: 1px solid;
+  }
+
+  .badge-completed { background: #dcfce7; color: #15803d; border-color: #bbf7d0; }
+  .badge-pending { background: #fef3c7; color: #b45309; border-color: #fde68a; }
+  .badge-awaiting { background: #e0f2fe; color: #0369a1; border-color: #bae6fd; }
+  .badge-cancelled { background: #fee2e2; color: #b91c1c; border-color: #fecaca; }
+  .badge-returned { background: #ffedd5; color: #c2410c; border-color: #fed7aa; }
+
+  /* کد و میان‌بر */
+  code {
+    background: #f1f5f9;
+    padding: 3px 8px;
+    border-radius: 6px;
+    font-family: 'Courier New', monospace;
+    font-size: 0.85rem;
+    direction: ltr;
+    display: inline-block;
+  }
+
+  kbd {
+    background: var(--dark);
+    color: white;
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-family: 'Segoe UI', Tahoma, sans-serif;
+    font-size: 0.8rem;
+    font-weight: bold;
+    box-shadow: 0 2px 0 #000;
+    display: inline-block;
+    margin: 2px;
+  }
+
+  .key-group {
+    margin: 6px 0;
+  }
+
+  /* ویژگی‌ها */
+  .features-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 16px;
+    margin-top: 15px;
+  }
+
+  .feature-card {
+    background: #f8fafc;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 18px 16px;
+    transition: transform 0.2s, box-shadow 0.2s;
+  }
+
+  .feature-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 6px 20px rgba(0,0,0,0.06);
+  }
+
+  .feature-card .icon {
+    font-size: 2rem;
+    margin-bottom: 10px;
+    display: block;
+  }
+
+  .feature-card .title {
+    font-weight: 700;
+    font-size: 1.05rem;
+    margin-bottom: 6px;
+    color: var(--dark);
+  }
+
+  .feature-card .desc {
+    font-size: 0.9rem;
+    color: var(--muted);
+    line-height: 1.6;
+  }
+
+  /* نشانگر مرحله */
+  .steps {
+    list-style-type: none;
+    counter-reset: step;
+  }
+
+  .steps li {
+    counter-increment: step;
+    position: relative;
+    padding-right: 40px;
+    margin-bottom: 12px;
+  }
+
+  .steps li::before {
+    content: counter(step);
+    position: absolute;
+    right: 0;
+    top: 0;
+    width: 28px;
+    height: 28px;
+    background: var(--primary);
+    color: white;
+    border-radius: 50%;
+    text-align: center;
+    line-height: 28px;
+    font-weight: bold;
+    font-size: 0.85rem;
+  }
+
+  /* برچسب نو */
+  .new-badge {
+    background: linear-gradient(135deg, #f97316, #ea580c);
+    color: white;
+    font-size: 0.7rem;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-weight: bold;
+    vertical-align: middle;
+    margin-right: 8px;
+  }
+
+  /* فوتر */
+  .footer {
+    text-align: center;
+    padding: 25px;
+    color: var(--muted);
+    font-size: 0.85rem;
+    border-top: 1px solid var(--border);
+    margin-top: 10px;
+  }
+
+  .repo-link {
+    color: var(--primary-dark);
+    text-decoration: none;
+    font-weight: bold;
+  }
+
+  @media (max-width: 768px) {
+    .header h1 {
+      font-size: 1.6rem;
+    }
+    .container {
+      padding: 0;
+    }
+    .section {
+      padding: 18px;
+    }
+  }
+</style>
+</head>
+<body>
+
+<div class="container">
+
+  <!-- ========== هدر ========== -->
+  <div class="header">
+    <h1>📋 Document & MOM Tracking System</h1>
+    <p>راهنمای کامل و جامع استفاده از نرم‌افزار پیگیری هوشمند صورتجلسات</p>
+    <span class="version">نسخه ۳.۰ | آخرین به‌روزرسانی: ۱۴۰۴</span>
+  </div>
+
+  <!-- ========== شروع سریع ========== -->
+  <div class="section">
+    <h2><span class="emoji">🚀</span> شروع سریع</h2>
+    <p>برای شروع کار با برنامه، مراحل زیر را دنبال کنید:</p>
+    <ol class="steps">
+      <li><strong>ورود به سیستم:</strong> پس از اجرای برنامه، با نام کاربری و رمز عبور خود وارد شوید.</li>
+      <li><strong>انتخاب دیتابیس (اختیاری):</strong> از منوی «فایل» گزینه «تغییر دیتابیس» را انتخاب کنید تا به یک فایل دیتابیس دیگر متصل شوید.</li>
+      <li><strong>تنظیم مسیر اسکن مدارک:</strong> از منوی «تنظیمات → مسیر اسکن مدارک»، پوشه شبکه‌ای که تصاویر اسکن‌شده صورتجلسات در آن قرار دارند را انتخاب کنید.</li>
+      <li><strong>ثبت اولین صورتجلسه:</strong> روی دکمه «➕ جدید» کلیک کنید و فرم را با اطلاعات موردنیاز پر کنید.</li>
+      <li><strong>مدیریت گردش کار:</strong> پس از ثبت، از دکمه «🔄 گردش کار» برای تعیین مراحل اقدام استفاده کنید.</li>
+      <li><strong>پیگیری پرونده:</strong> با دکمه «📈 پیگیری پرونده» می‌توانید کارشناس مسئول را تعیین و پاسخ پیمانکار را ثبت کنید.</li>
+    </ol>
+
+    <div class="info-box">
+      <strong>💡 نکته:</strong>
+      اگر از قبل دیتابیسی دارید که در جلسات گذشته استفاده شده، ابتدا آن را از «فایل → تغییر دیتابیس» انتخاب کنید تا اطلاعات قبلی برای شما بارگذاری شود.
+    </div>
+  </div>
+
+  <!-- ========== سیستم رصد هوشمند وضعیت ========== -->
+  <div class="section">
+    <h2><span class="emoji">🎯</span> سیستم رصد هوشمند وضعیت <span class="new-badge">جدید</span></h2>
+    <p>یکی از قابلیت‌های بی‌نظیر این نسخه، <strong>محاسبه کاملاً خودکار وضعیت هر صورتجلسه بر اساس گردش کار زنده</strong> است. کاربر دیگر نیازی به انتخاب دستی وضعیت ندارد!</p>
+
+    <h3>وضعیت‌های سیستم و رنگ‌بندی هوشمند:</h3>
+    <div class="status-badges">
+      <span class="badge badge-pending">در دست بررسی</span>
+      <span class="badge badge-awaiting">در انتظار تأیید</span>
+      <span class="badge badge-completed">تکمیل شده</span>
+      <span class="badge badge-cancelled">لغو شده</span>
+      <span class="badge badge-returned">بازگشت داده شده</span>
+    </div>
+
+    <h3>منطق محاسبه خودکار وضعیت:</h3>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>شرط در گردش کار</th>
+            <th>وضعیت خودکار سند</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>یکی از گام‌های گردش کار توسط کارشناس عودت داده شده (Rejected)</td>
+            <td><span class="badge badge-returned">بازگشت داده شده</span></td>
+          </tr>
+          <tr>
+            <td>تمام گام‌های گردش کار تکمیل یا عبور داده شده‌اند</td>
+            <td><span class="badge badge-completed">تکمیل شده</span></td>
+          </tr>
+          <tr>
+            <td>حداقل یک گام در حال انجام (In Progress) وجود دارد</td>
+            <td><span class="badge badge-awaiting">در انتظار تأیید</span></td>
+          </tr>
+          <tr>
+            <td>گام‌ها هنوز شروع نشده یا در حال پیگیری هستند</td>
+            <td><span class="badge badge-pending">در دست بررسی</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="success-box">
+      <strong>✔ مزیت این سیستم:</strong>
+      دیگر تناقضی میان وضعیت واقعی سند و آنچه در جدول نمایش داده می‌شود وجود نخواهد داشت. با هر تغییر در گردش کار، وضعیت به‌طور خودکار محاسبه و به‌روزرسانی می‌شود.
+    </div>
+
+    <div class="info-box">
+      <strong>🔄 همگام‌سازی سراسری:</strong>
+      برای به‌روزرسانی وضعیت تمام صورتجلسات قدیمی به صورت یکجا، از منوی «نمایش → همگام‌سازی وضعیت‌ها با گردش کار» استفاده کنید.
+    </div>
+  </div>
+
+  <!-- ========== جدول اصلی و مدیریت داده‌ها ========== -->
+  <div class="section">
+    <h2><span class="emoji">📂</span> جدول اصلی و مدیریت داده‌ها</h2>
+    <p>این بخش اصلی‌ترین امکانات برنامه را شامل می‌شود.</p>
+
+    <h3>✅ جدول اصلی</h3>
+    <p>تمامی صورتجلسات در یک جدول قابل مشاهده هستند. از طریق این جدول می‌توانید:</p>
+    <ul>
+      <li><strong>مشاهده سریع</strong> وضعیت، اولویت، تاریخ‌ها و سایر جزئیات با رنگ‌بندی هوشمند</li>
+      <li><strong>مشاهده کارشناس رسیدگی‌کننده و مرحله جاری</strong> به صورت خودکار در ستون‌های اختصاصی</li>
+      <li><strong>مرتب‌سازی</strong> با کلیک روی عنوان هر ستون (صعودی/نزولی)</li>
+      <li><strong>انتخاب چندگانه</strong> با نگه‌داشتن Ctrl یا Shift</li>
+      <li><strong>ویرایش سریع</strong> با دوبار کلیک روی ردیف</li>
+      <li><strong>راست‌کلیک</strong> جهت دسترسی به منوی سریع (ویرایش، گردش کار، پیگیری، اسکن، کپی شماره)</li>
+    </ul>
+
+    <h3>🎨 رنگ‌بندی هوشمند سطرها</h3>
+    <div class="features-grid">
+      <div class="feature-card" style="background: #FEE2E2;">
+        <div class="title" style="color: #991B1B;">🔴 قرمز - سررسید گذشته</div>
+        <div class="desc">پرونده‌هایی که از مهلت انجام آن‌ها گذشته و همچنان باز هستند.</div>
+      </div>
+      <div class="feature-card" style="background: #FEF3C7;">
+        <div class="title" style="color: #92400E;">🟡 زرد - در آستانه سررسید</div>
+        <div class="desc">پرونده‌هایی که کمتر از ۳ روز تا مهلت انجام دارند.</div>
+      </div>
+      <div class="feature-card" style="background: #DCFCE7;">
+        <div class="title" style="color: #166534;">🟢 سبز - تکمیل شده</div>
+        <div class="desc">پرونده‌هایی که تمام مراحل گردش کار آن‌ها به اتمام رسیده.</div>
+      </div>
+      <div class="feature-card" style="background: #FFEDD5;">
+        <div class="title" style="color: #9A3412;">🟠 نارنجی - بازگشت داده شده</div>
+        <div class="desc">پرونده‌هایی که توسط کارشناس جهت اصلاح عودت داده شده‌اند.</div>
+      </div>
+    </div>
+
+    <h3>🔍 جستجو و فیلتر</h3>
+    <p>در بالای پنجره، امکانات زیر برای یافتن سریع رکوردها فراهم شده است:</p>
+    <ul>
+      <li><strong>جستجوی متن آزاد:</strong> در باکس «جستجوی سریع» می‌توانید بر اساس شماره، موضوع، کارفرما، پیمانکار یا دیسیپلین جستجو کنید.</li>
+      <li><strong>فیلترهای دسترسی سریع:</strong> وضعیت، اولویت، دیسیپلین، کارفرما، پیمانکار</li>
+    </ul>
+
+    <h3>📄 صفحه‌بندی</h3>
+    <p>در پایین جدول، امکان انتخاب تعداد رکورد در هر صفحه (۲۵ تا ۵۰۰) و جابجایی بین صفحات وجود دارد.</p>
+
+    <h3>➕ عملیات اصلی</h3>
+    <div class="features-grid">
+      <div class="feature-card">
+        <span class="icon">➕</span>
+        <div class="title">جدید</div>
+        <div class="desc">ثبت صورتجلسه جدید با کلیک روی دکمه «➕ جدید» یا Ctrl+N</div>
+      </div>
+      <div class="feature-card">
+        <span class="icon">✏️</span>
+        <div class="title">ویرایش</div>
+        <div class="desc">ویرایش رکورد انتخاب‌شده (دکمه «✏️ ویرایش» یا Ctrl+E)</div>
+      </div>
+      <div class="feature-card">
+        <span class="icon">🗑️</span>
+        <div class="title">حذف</div>
+        <div class="desc">حذف یک یا چند رکورد به صورت منطقی (دکمه «🗑️ حذف» یا Delete)</div>
+      </div>
+      <div class="feature-card">
+        <span class="icon">🔄</span>
+        <div class="title">گردش کار</div>
+        <div class="desc">مدیریت مراحل اقدام برای صورتجلسه انتخاب‌شده (Ctrl+W)</div>
+      </div>
+      <div class="feature-card">
+        <span class="icon">📈</span>
+        <div class="title">پیگیری پرونده</div>
+        <div class="desc">تعیین کارشناس مسئول، ثبت پاسخ پیمانکار و مشاهده تاریخچه</div>
+      </div>
+      <div class="feature-card">
+        <span class="icon">🔍</span>
+        <div class="title">مدرک اسکن‌شده</div>
+        <div class="desc">جستجو و باز کردن خودکار فایل اسکن‌شده در پوشه شبکه (Ctrl+Shift+S)</div>
+      </div>
+      <div class="feature-card">
+        <span class="icon">📊</span>
+        <div class="title">نمودار</div>
+        <div class="desc">مشاهده نمودارهای تحلیلی وضعیت و اولویت</div>
+      </div>
+      <div class="feature-card">
+        <span class="icon">📥</span>
+        <div class="title">خروجی اکسل</div>
+        <div class="desc">خروجی جدول جاری با فرمت اکسل یا CSV (Ctrl+Shift+E)</div>
+      </div>
+    </div>
+
+    <div class="warning-box">
+      <strong>⚠️ هشدار:</strong>
+      عمل حذف به‌صورت منطقی انجام می‌شود اما رکوردها از دید عمومی خارج می‌شوند؛ قبل از تأیید، از صحت انتخاب خود مطمئن شوید.
+    </div>
+  </div>
+
+  <!-- ========== فرم ثبت / ویرایش ========== -->
+  <div class="section">
+    <h2><span class="emoji">📝</span> فرم ثبت / ویرایش صورتجلسه</h2>
+    <p>با کلیک روی «جدید» یا «ویرایش» فرمی باز می‌شود که شامل اطلاعات کامل صورتجلسه است.</p>
+
+    <div class="info-box">
+      <strong>🎯 تغییر مهم در این نسخه:</strong>
+      فیلد «وضعیت» از این فرم حذف شده است، زیرا سیستم به صورت خودکار و بر اساس گردش کار، وضعیت را محاسبه می‌کند. همچنین انتخاب دستی فایل نیز حذف شده و به جای آن سیستم هوشمند اسکن مدارک جایگزین شده است.
+    </div>
+
+    <h3>فیلدهای فرم</h3>
+    <ul>
+      <li><strong>شماره صورتجلسه *</strong> (الزامی) — پشتیبانی از فرمت‌های ترکیبی مانند <code>403-MOM-PSN-054</code></li>
+      <li><strong>موضوع *</strong> (الزامی)</li>
+      <li><strong>تاریخ صورتجلسه *</strong> (الزامی) — فرمت شمسی: ۱۴۰۴-۰۱-۱۵</li>
+      <li><strong>تاریخ قرارداد، تاریخ ارسال به پیمانکار</strong></li>
+      <li><strong>مهلت انجام *</strong> (الزامی)</li>
+      <li><strong>تاریخ بسته شدن، تاریخ پاسخ پیمانکار</strong></li>
+      <li><strong>کارفرما، مشاور، پیمانکار</strong> (فیلدهای متنی با پیشنهادهای هوشمند از سوابق قبلی)</li>
+      <li><strong>شماره نقشه، شماره قرارداد</strong> (چپ‌چین برای خوانایی بهتر کدهای فنی)</li>
+      <li><strong>دیسیپلین</strong> (عمران، مکانیک، برق، ابزار دقیق، معماری، فرآیند، خطوط لوله، HSE، سایر)</li>
+      <li><strong>اولویت</strong> (بالا / متوسط / پایین)</li>
+      <li><strong>وضعیت پاسخ پیمانکار</strong> (در انتظار پاسخ / پاسخ دریافت شد / نیازمند اصلاح / مشروط / رد شد)</li>
+      <li><strong>تعداد برگه‌های پیوست</strong> <span class="new-badge">جدید</span> — تنها عدد وارد کنید؛ فایل خودکار پیدا می‌شود</li>
+    </ul>
+
+    <h3>📋 کپی هوشمند از صورتجلسه قبل</h3>
+    <p>دکمه «📋 کپی هوشمند از صورتجلسه قبل» در بالای فرم به شما این امکان را می‌دهد که فیلدهای ساختاری تکراری را از آخرین صورتجلسه ثبت‌شده کپی کنید.</p>
+    <ul>
+      <li>فیلدهای کپی شده: کارفرما، مشاور، پیمانکار، دیسیپلین، شماره قرارداد، تاریخ قرارداد، شماره نقشه</li>
+      <li>فیلدهای یکتا و زمان‌بندی (شماره سند، تاریخ‌ها) جهت جلوگیری از تداخل، خالی نگه داشته می‌شوند</li>
+    </ul>
+  </div>
+
+  <!-- ========== تعداد پیوست و اسکن هوشمند ========== -->
+  <div class="section">
+    <h2><span class="emoji">🔍</span> تعداد پیوست و اسکن هوشمند مدارک <span class="new-badge">جدید</span></h2>
+    <p>در این نسخه، فرآیند مدیریت پیوست به‌صورت کاملاً هوشمند بازطراحی شده است.</p>
+
+    <h3>💡 چگونگی کار سیستم اسکن هوشمند:</h3>
+    <ol class="steps">
+      <li><strong>تنظیم مسیر شبکه:</strong> از منوی «تنظیمات → مسیر اسکن مدارک»، پوشه‌ای که کارشناسان تصاویر اسکن‌شده را در آن ذخیره می‌کنند را انتخاب کنید (مانند <code>\\Server\Scans\MOM</code>).</li>
+      <li><strong>نام‌گذاری فایل‌های اسکن:</strong> نام هر فایل PDF یا تصویری باید <strong>دقیقاً برابر با شماره صورتجلسه</strong> باشد. مثلاً برای صورتجلسه <code>403-MOM-PSN-054</code>، فایل باید <code>403-MOM-PSN-054.pdf</code> نامیده شود.</li>
+      <li><strong>باز کردن خودکار:</strong> با انتخاب صورتجلسه و کلیک روی دکمه «🔍 مدرک اسکن‌شده» یا فشردن <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd>، سیستم به صورت خودکار فایل مربوطه را در پوشه شبکه جستجو و باز می‌کند.</li>
+      <li><strong>اولویت PDF:</strong> اگر چند فایل با نام یکسان یافت شود، ابتدا PDF‌ها اولویت دارند.</li>
+    </ol>
+
+    <h3>📊 تعداد برگه‌های پیوست:</h3>
+    <p>در فرم ثبت صورتجلسه، به جای انتخاب فایل، تنها تعداد برگه‌های پیوست را وارد می‌کنید (مانند نقشه‌ها، جداول، گزارش‌ها و ...). این عدد در جدول اصلی نیز نمایش داده می‌شود.</p>
+
+    <h3>وضعیت اتصال پوشه اسکن:</h3>
+    <p>در نوار وضعیت پایین برنامه، وضعیت اتصال به پوشه اسکن به صورت زنده نمایش داده می‌شود:</p>
+    <ul>
+      <li><span style="color: #16a34a; font-weight: bold;">اسکن: متصل ✓</span> — پوشه در دسترس است</li>
+      <li><span style="color: #dc2626; font-weight: bold;">اسکن: قطع ✕</span> — پوشه در دسترس نیست</li>
+    </ul>
+
+    <div class="warning-box">
+      <strong>⚠️ نکته مهم:</strong>
+      اگر مدرکی اسکن نشده باشد، سیستم پیامی نمایش می‌دهد و از شما می‌خواهد که فایل را اسکن کرده و در مسیر مشخص قرار دهید.
+    </div>
+  </div>
+
+  <!-- ========== گردش کار ========== -->
+  <div class="section">
+    <h2><span class="emoji">🔄</span> گردش کار</h2>
+    <p>یکی از قابلیت‌های کلیدی برنامه، امکان تعریف و پیگیری مراحل گردش کار برای هر صورتجلسه است. با کلیک روی «🔄 گردش کار» پنجره مربوطه باز می‌شود.</p>
+
+    <h3>مراحل گردش کار</h3>
+    <p>سیستم به‌صورت پیش‌فرض ۶ مرحله را برای هر صورتجلسه در نظر گرفته است (برای مثال: تهیه پیش‌نویس، تأیید ناظر، ارسال به پیمانکار و...). این مراحل معمولاً از قبل در دیتابیس تعریف شده‌اند.</p>
+
+    <h3>وضعیت گام‌ها:</h3>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>وضعیت گام</th>
+            <th>معنا</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Pending</td>
+            <td>در انتظار انجام</td>
+          </tr>
+          <tr>
+            <td>In Progress</td>
+            <td>در حال انجام</td>
+          </tr>
+          <tr>
+            <td>Completed</td>
+            <td>تکمیل شده</td>
+          </tr>
+          <tr>
+            <td>Skipped</td>
+            <td>عبور شده</td>
+          </tr>
+          <tr>
+            <td>Rejected</td>
+            <td>برگشت داده شده جهت اصلاح</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>عملیات ممکن</h3>
+    <div class="features-grid">
+      <div class="feature-card">
+        <span class="icon">📥</span>
+        <div class="title">ورود به مرحله</div>
+        <div class="desc">شروع یک مرحله و ثبت تاریخ ورود و مسئول جدید (Ctrl+E)</div>
+      </div>
+      <div class="feature-card">
+        <span class="icon">📤</span>
+        <div class="title">خروج از مرحله</div>
+        <div class="desc">پایان یک مرحله، ثبت تاریخ خروج و امضاء (Ctrl+X)</div>
+      </div>
+      <div class="feature-card">
+        <span class="icon">✅</span>
+        <div class="title">تکمیل مرحله</div>
+        <div class="desc">همان خروج سریع (Ctrl+Shift+X)</div>
+      </div>
+      <div class="feature-card">
+        <span class="icon">🔄</span>
+        <div class="title">بازگشت مرحله (Reject)</div>
+        <div class="desc">عودت پرونده برای اصلاح توسط کارشناس قبلی (Ctrl+B)</div>
+      </div>
+      <div class="feature-card">
+        <span class="icon">📝</span>
+        <div class="title">یادداشت</div>
+        <div class="desc">ثبت توضیحات و علت عودت برای هر مرحله (Ctrl+N)</div>
+      </div>
+      <div class="feature-card">
+        <span class="icon">🖨️</span>
+        <div class="title">چاپ گزارش A5</div>
+        <div class="desc">چاپ گزارش گردش کار در قطع A5 (Ctrl+P)</div>
+      </div>
+    </div>
+
+    <div class="success-box">
+      <strong>✔ نکته کاربردی:</strong>
+      وقتی گامی را <strong>Reject</strong> می‌کنید، وضعیت کلی سند به‌طور خودکار به <span class="badge badge-returned">بازگشت داده شده</span> تغییر می‌یابد و در دیالوگ پیگیری، هشدار قرمز رنگ به همراه علت عودت نمایش داده می‌شود.
+    </div>
+  </div>
+
+  <!-- ========== دیالوگ پیگیری پرونده ========== -->
+  <div class="section">
+    <h2><span class="emoji">📈</span> دیالوگ پیگیری پرونده <span class="new-badge">جدید</span></h2>
+    <p>دیالوگ «📈 پیگیری پرونده» یکی از قدرتمندترین ابزارهای این نسخه است. با انتخاب یک صورتجلسه و کلیک روی این دکمه، پنجره‌ای هوشمند باز می‌شود که موارد زیر را ارائه می‌دهد:</p>
+
+    <h3>👤 انتخاب و تخصیص کارشناس مسئول</h3>
+    <p>ادمین می‌تواند از یک منوی کشویی هوشمند که <strong>لیست تمام کاربران فعال سیستم را نمایش می‌دهد</strong>، کارشناس مسئول رسیدگی به این پرونده را انتخاب کند. با کلیک روی «ذخیره تغییرات پیگیری»، این کارشناس روی گام فعال گردش کار پرونده اعمال می‌شود.</p>
+
+    <ol class="steps">
+      <li>ابتدا کاربران کارشناس را در بخش «مدیریت کاربران» تعریف کنید.</li>
+      <li>سپس در دیالوگ پیگیری پرونده، کارشناس مورد نظر را از منوی کشویی «👤 کارشناس مسئول (رسیدگی‌کننده)» انتخاب کنید.</li>
+      <li>پس از ذخیره، نام کارشناس در ستون «کارشناس رسیدگی‌کننده» جدول اصلی نمایش داده می‌شود.</li>
+    </ol>
+
+    <h3>📡 رصد زنده وضعیت گردش کار</h3>
+    <p>در بالای دیالوگ، یک بج رنگی نشان‌دهنده وضعیت زنده سند به همراه اطلاعات کارشناس فعال و مرحله جاری وجود دارد.</p>
+
+    <h3>⚠️ هشدار عودت هوشمند</h3>
+    <p>اگر سند در طول گردش کار توسط یکی از کارشناسان عودت داده شده باشد، یک پنل قرمز رنگ به صورت خودکار فعال می‌شود که نشان می‌دهد:</p>
+    <ul>
+      <li>چه کسی سند را عودت داده است</li>
+      <li>در چه مرحله‌ای عودت رخ داده</li>
+      <li>علت عودت (توضیحات ثبت شده توسط کارشناس)</li>
+    </ul>
+
+    <h3>✉️ ثبت پاسخ پیمانکار</h3>
+    <p>در بخش پایین، می‌توانید موارد زیر را ثبت کنید:</p>
+    <ul>
+      <li>تاریخ ارسال سند به پیمانکار</li>
+      <li>تاریخ پاسخ دریافت‌شده از پیمانکار</li>
+      <li>خلاصه پاسخ / شماره نامه وارده</li>
+    </ul>
+
+    <div class="info-box">
+      <strong>💡 نکته:</strong>
+      با ثبت تاریخ پاسخ پیمانکار، وضعیت پاسخ به صورت خودکار به «پاسخ دریافت شد» تغییر می‌یابد.
+    </div>
+  </div>
+
+  <!-- ========== گزارش‌ها و نمودارها ========== -->
+  <div class="section">
+    <h2><span class="emoji">📊</span> گزارش‌گیری و نمودار</h2>
+    <p>برنامه امکانات کامل گزارش‌گیری و تجزیه‌وتحلیل دارد.</p>
+
+    <h3>داشبورد عملیاتی MOM</h3>
+    <p>از منوی «نمایش → داشبورد عملیاتی MOM»، به داشبورد جامع تحلیل عملکرد پروژه دسترسی خواهید داشت.</p>
+
+    <h3>نمودار وضعیت</h3>
+    <p>با دکمه «📊 نمودار»، نمودار تحلیلی وضعیت‌ها و اولویت‌ها به صورت تعاملی نمایش داده می‌شود.</p>
+
+    <h3>خروجی جدول</h3>
+    <p>دکمه «📥 خروجی» در نوار عملیات، جدول جاری را با فرمت اکسل یا CSV ذخیره می‌کند.</p>
+
+    <h3>در پنجره نمودار (ChartDialog)</h3>
+    <ul>
+      <li><strong>ذخیره گزارش HTML:</strong> یک فایل HTML با نمودار داخلی و جداول آماده چاپ تولید می‌شود.</li>
+      <li><strong>خروجی اکسل:</strong> داده‌های جدول با فرمت‌بندی مناسب به اکسل (xlsx) ذخیره می‌شوند.</li>
+      <li><strong>خروجی CSV:</strong> ساده و سازگار با اکسل و برنامه‌های دیگر.</li>
+    </ul>
+
+    <div class="info-box">
+      <strong>💡 نکته:</strong>
+      برای خروجی اکسل، برنامه ابتدا بررسی می‌کند که کتابخانه <code>openpyxl</code> نصب باشد و در صورت نبود آن، پیام نصب را نمایش می‌دهد.
+    </div>
+  </div>
+
+  <!-- ========== ورود داده‌ها ========== -->
+  <div class="section">
+    <h2><span class="emoji">📥</span> ورود داده‌ها و قالب‌ها</h2>
+
+    <h3>واردات از اکسل/CSV</h3>
+    <p>از منوی «فایل → واردات از اکسل/CSV...» می‌توانید داده‌های خود را از یک فایل اکسل یا CSV وارد برنامه کنید.</p>
+    <ul>
+      <li>فرمت فایل باید با ستون‌های تعریف‌شده در جداول برنامه مطابقت داشته باشد.</li>
+      <li>حین واردات، پیشرفت عملیات در پایین پنجره نمایش داده می‌شود.</li>
+      <li>موارد رد شده (در صورت وجود) در پایان گزارش داده می‌شوند.</li>
+    </ul>
+
+    <h3>دانلود قالب ورود</h3>
+    <p>دکمه «📝 قالب» به شما یک فایل اکسل یا CSV با سربرگ‌های صحیح می‌دهد که می‌توانید آن را پر کرده و دوباره وارد کنید.</p>
+
+    <div class="warning-box">
+      <strong>⚠️ توجه:</strong>
+      عملیات واردات فقط با داشتن سطح دسترسی «نوشتن» امکان‌پذیر است. در صورت عدم دسترسی، گزینه‌ها غیرفعال هستند.
+    </div>
+  </div>
+
+  <!-- ========== مدیریت کاربران و دسترسی‌ها ========== -->
+  <div class="section">
+    <h2><span class="emoji">👥</span> مدیریت کاربران و سطوح دسترسی</h2>
+    <p>برنامه از یک سیستم مدیریت کاربران ساده اما کارآمد استفاده می‌کند.</p>
+
+    <div class="info-box">
+      <strong>💡 مهم:</strong>
+      برای اینکه بتوانید یک کارشناس را در دیالوگ «پیگیری پرونده» به عنوان مسئول رسیدگی به سند انتخاب کنید، ابتدا باید حساب کاربری آن کارشناس را در این بخش ایجاد کرده باشید.
+    </div>
+
+    <h3>نقش‌ها و مجوزها</h3>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>مجوز</th>
+            <th>توضیح</th>
+            <th>دسترسی پیش‌فرض</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>PERM_REPORT_WRITE</td>
+            <td>ثبت، ویرایش، حذف، ورود داده و دانلود قالب</td>
+            <td>مدیر، کاربر</td>
+          </tr>
+          <tr>
+            <td>PERM_REPORT_EXPORT</td>
+            <td>خروجی اکسل و CSV</td>
+            <td>همه نقش‌ها</td>
+          </tr>
+          <tr>
+            <td>PERM_USER_ADMIN</td>
+            <td>مدیریت کاربران (افزودن، ویرایش، حذف)</td>
+            <td>مدیر</td>
+          </tr>
+          <tr>
+            <td>PERM_DB_PUBLISH</td>
+            <td>انتشار دیتابیس فقط‌خواندنی</td>
+            <td>مدیر</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>مدیریت کاربران در دیالوگ اختصاصی</h3>
+    <p>از منوی «⚙️ مدیریت → مدیریت کاربران...» می‌توانید:</p>
+    <ul>
+      <li>کاربران جدید تعریف کنید (با تعیین نام کاربری، رمز عبور و نقش)</li>
+      <li>نقش کاربران موجود را تغییر دهید</li>
+      <li>کاربران را فعال یا غیرفعال کنید</li>
+      <li>رمز عبور کاربران را بازنشانی کنید</li>
+      <li>کاربران را حذف کنید (به‌جز آخرین مدیر فعال)</li>
+      <li>سربرگ سازمانی گزارشات (نام شرکت و پروژه) را تنظیم کنید</li>
+    </ul>
+
+    <div class="danger-box">
+      <strong>🔒 امنیت:</strong>
+      برای محافظت از اطلاعات، همیشه کاربران را با کمترین سطح دسترسی لازم ایجاد کنید و رمز عبور پیش‌فرض را در اولین ورود تغییر دهید. رمز عبور باید حداقل ۸ کاراکتر باشد.
+    </div>
+  </div>
+
+  <!-- ========== مدیریت دیتابیس ========== -->
+  <div class="section">
+    <h2><span class="emoji">🗄️</span> مدیریت دیتابیس</h2>
+
+    <h3>تغییر دیتابیس</h3>
+    <p>از «فایل → تغییر دیتابیس...» می‌توانید به یک فایل SQLite دیگر متصل شوید. قبل از تغییر، برنامه از شما می‌خواهد دوباره لاگین کنید.</p>
+
+    <h3>پشتیبان‌گیری</h3>
+    <p>از «فایل → پشتیبان‌گیری...» یک کپی از فایل دیتابیس در محل دلخواه ذخیره می‌شود. توصیه می‌شود به‌صورت دوره‌ای از اطلاعات خود بکاپ بگیرید.</p>
+
+    <h3>انتشار دیتابیس (فقط‌خواندنی)</h3>
+    <p>با این گزینه، یک کپی از دیتابیس ساخته می‌شود که فایل آن فقط‌خواندنی است. این نسخه مناسب اشتراک‌گذاری با دیگران بدون امکان تغییر است.</p>
+
+    <h3>نشانگر دیتابیس در نوار وضعیت</h3>
+    <p>در پایین پنجره، یک نقطه سبز «●» چشمک‌زن نشان‌دهنده سالم بودن مسیر دیتابیس است. با کلیک روی آن، پوشه حاوی دیتابیس باز می‌شود.</p>
+  </div>
+
+  <!-- ========== ظاهر و تنظیمات ========== -->
+  <div class="section">
+    <h2><span class="emoji">🎨</span> تنظیمات ظاهری و محیط کاربری</h2>
+
+    <h3>حالت شب/روز</h3>
+    <p>از منوی «👁️ نمایش → حالت شب/روز» می‌توانید تم برنامه را تغییر دهید. حالت شب برای کار در محیط کم‌نور مناسب است.</p>
+
+    <h3>بازنشانی اندازه ستون‌ها</h3>
+    <p>اگر اندازه ستون‌ها را به هم ریخته‌اید، از «👁️ نمایش → بازنشانی اندازه ستون‌ها» استفاده کنید تا برنامه به‌صورت اتوماتیک عرض ستون‌ها را بهینه کند.</p>
+
+    <h3>ذخیره تنظیمات</h3>
+    <p>برنامه به‌صورت خودکار موارد زیر را ذخیره می‌کند:</p>
+    <ul>
+      <li>موقعیت و ابعاد پنجره اصلی</li>
+      <li>چیدمان ستون‌های جدول</li>
+      <li>انتخاب حالت شب/روز</li>
+      <li>مسیر آخرین دیتابیس باز شده</li>
+      <li>مسیر پوشه اسکن مدارک</li>
+      <li>هندسه دیالوگ گردش کار و مدیریت کاربران</li>
+      <li>سربرگ سازمانی گزارشات</li>
+    </ul>
+  </div>
+
+  <!-- ========== میان‌برهای صفحه‌کلید ========== -->
+  <div class="section">
+    <h2><span class="emoji">⌨️</span> میان‌برهای صفحه‌کلید</h2>
+    <p>برای افزایش سرعت کار، میان‌برهای زیر در دسترس هستند:</p>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>عملیات</th>
+            <th>کلید میان‌بر</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>ایجاد صورتجلسه جدید</td><td><kbd>Ctrl</kbd> + <kbd>N</kbd></td></tr>
+          <tr><td>ویرایش رکورد انتخاب‌شده</td><td><kbd>Ctrl</kbd> + <kbd>E</kbd></td></tr>
+          <tr><td>حذف رکورد(ها)</td><td><kbd>Delete</kbd></td></tr>
+          <tr><td>بروزرسانی لیست</td><td><kbd>F5</kbd></td></tr>
+          <tr><td>جستجو</td><td><kbd>Ctrl</kbd> + <kbd>F</kbd></td></tr>
+          <tr><td>خروجی اکسل</td><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>E</kbd></td></tr>
+          <tr><td>گردش کار</td><td><kbd>Ctrl</kbd> + <kbd>W</kbd></td></tr>
+          <tr><td>باز کردن مدرک اسکن‌شده</td><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>S</kbd></td></tr>
+          <tr><td>کپی شماره صورتجلسه</td><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>C</kbd></td></tr>
+          <tr><td>ورود به مرحله گردش کار</td><td><kbd>Ctrl</kbd> + <kbd>E</kbd> (در دیالوگ گردش کار)</td></tr>
+          <tr><td>خروج از مرحله گردش کار</td><td><kbd>Ctrl</kbd> + <kbd>X</kbd></td></tr>
+          <tr><td>تکمیل سریع مرحله</td><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>X</kbd></td></tr>
+          <tr><td>یادداشت‌ها</td><td><kbd>Ctrl</kbd> + <kbd>N</kbd></td></tr>
+          <tr><td>چاپ گردش کار</td><td><kbd>Ctrl</kbd> + <kbd>P</kbd></td></tr>
+          <tr><td>بازگشت مرحله (Reject)</td><td><kbd>Ctrl</kbd> + <kbd>B</kbd></td></tr>
+          <tr><td>بستن دیالوگ</td><td><kbd>Esc</kbd></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ========== نکات و عیب‌یابی ========== -->
+  <div class="section">
+    <h2><span class="emoji">🔧</span> نکات و عیب‌یابی</h2>
+
+    <div class="warning-box">
+      <strong>⚠️ نام کارشناس در جدول نمایش داده نمی‌شود:</strong>
+      اگر ستون «کارشناس رسیدگی‌کننده» خالی است یا فقط نام <code>admin</code> نمایش داده می‌شود، از دیالوگ «📈 پیگیری پرونده» استفاده کرده و کارشناس مسئول را از منوی کشویی انتخاب و ذخیره کنید.
+    </div>
+
+    <div class="warning-box">
+      <strong>⚠️ فایل اسکن شده باز نمی‌شود:</strong>
+      مطمئن شوید که:
+      <ol>
+        <li>مسیر پوشه اسکن در تنظیمات به‌درستی تنظیم شده است.</li>
+        <li>نام فایل PDF دقیقاً برابر با شماره صورتجلسه است.</li>
+        <li>پوشه شبکه در دسترس است (نشانگر «اسکن: متصل ✓» در نوار وضعیت پایین).</li>
+      </ol>
+    </div>
+
+    <div class="warning-box">
+      <strong>⚠️ وضعیت سند تکمیل شده نشان داده نمی‌شود:</strong>
+      از منوی «نمایش → همگام‌سازی وضعیت‌ها با گردش کار» استفاده کنید تا وضعیت تمام سوابق قدیمی با منطق جدید همگام شود.
+    </div>
+
+    <div class="info-box">
+      <strong>📅 تاریخ شمسی:</strong>
+      تمامی تاریخ‌ها به‌صورت شمسی (مثلاً ۱۴۰۴-۰۵-۱۵) نمایش داده می‌شوند و هنگام ذخیره به میلادی تبدیل می‌شوند. اگر تاریخ وارد شده نامعتبر باشد، خطا نمایش داده می‌شود.
+    </div>
+
+    <div class="info-box">
+      <strong>🖨️ مشکلات چاپ:</strong>
+      اگر در چاپ گزارش خطایی رخ داد، مطمئن شوید که چاپگر پیش‌فرض شما فعال است و صفحه A4 یا A5 را پشتیبانی می‌کند.
+    </div>
+
+    <div class="info-box">
+      <strong>📊 matplotlib نصب نیست:</strong>
+      اگر دکمه نمودار کار نکرد، ابتدا matplotlib را با دستور <code>pip install matplotlib</code> نصب کنید.
+    </div>
+
+    <div class="danger-box">
+      <strong>🗃️ پشتیبان‌گیری منظم:</strong>
+      همیشه قبل از اعمال تغییرات عمده یا به‌روزرسانی برنامه، از دیتابیس خود پشتیبان بگیرید. این کار از دست رفتن ناگهانی اطلاعات جلوگیری می‌کند.
+    </div>
+  </div>
+
+  <!-- ========== ویژگی‌های نسخه ۳.۰ ========== -->
+  <div class="section">
+    <h2><span class="emoji">✨</span> ویژگی‌های شاخص نسخه ۳.۰</h2>
+    <div class="features-grid">
+      <div class="feature-card">
+        <span class="icon">🎯</span>
+        <div class="title">رصد خودکار وضعیت</div>
+        <div class="desc">وضعیت به‌طور خودکار از گردش کار محاسبه می‌شود؛ دیگر نیازی به ورود دستی نیست.</div>
+      </div>
+      <div class="feature-card">
+        <span class="icon">👤</span>
+        <div class="title">تخصیص کارشناس هوشمند</div>
+        <div class="desc">انتخاب کارشناس مسئول از لیست کاربران فعال سیستم به صورت زنده.</div>
+      </div>
+      <div class="feature-card">
+        <span class="icon">🔍</span>
+        <div class="title">سیستم اسکن هوشمند</div>
+        <div class="desc">جستجو و باز کردن خودکار فایل‌های اسکن‌شده از پوشه شبکه بر اساس شماره سند.</div>
+      </div>
+      <div class="feature-card">
+        <span class="icon">🟠</span>
+        <div class="title">وضعیت بازگشت داده شده</div>
+        <div class="desc">شناسایی خودکار سندهای عودت داده شده جهت اصلاح با رنگ‌بندی نارنجی.</div>
+      </div>
+      <div class="feature-card">
+        <span class="icon">📋</span>
+        <div class="title">کپی هوشمند اطلاعات</div>
+        <div class="desc">کپی سریع اطلاعات ساختاری از آخرین صورتجلسه ثبت‌شده.</div>
+      </div>
+      <div class="feature-card">
+        <span class="icon">🎨</span>
+        <div class="title">رابط کاربری مدرن SaaS</div>
+        <div class="desc">طراحی فلت و شکیل با نوار فیروزه‌ای، دکمه‌های گرادینت و افکت‌های زیبا.</div>
+      </div>
+      <div class="feature-card">
+        <span class="icon">⚡</span>
+        <div class="title">عملکرد فوق سریع</div>
+        <div class="desc">لود دسته‌ای اطلاعات گردش کار (Bulk Loading) با ۵۰ برابر سرعت بیشتر.</div>
+      </div>
+      <div class="feature-card">
+        <span class="icon">🌗</span>
+        <div class="title">حالت شب/روز</div>
+        <div class="desc">تم تیره اختصاصی برای کار در محیط کم‌نور و کاهش خستگی چشم.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========== فوتر ========== -->
+  <div class="footer">
+    <p><strong>Document & MOM Tracking System — نسخه ۳.۰</strong></p>
+    <p>سامانه جامع مدیریت، پیگیری هوشمند و گردش‌کار صورتجلسات</p>
+    <p>© ۱۴۰۴ تمامی حقوق محفوظ است.</p>
+  </div>
+
+</div>
+
+</body>
+</html>

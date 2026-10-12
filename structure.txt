@@ -1,0 +1,56 @@
+Document_MOM_Tracking_System:
+|   app.ico
+|   app.py
+|   config.py
+|   meetings.db
+|   meetings.db-shm
+|   meetings.db-wal
+|   MOM_Tracking_System.spec
+|   README.md
+|   RELEASE_NOTES.md
+|   requirements.txt
+|   structure.txt
+|   user_guide.html
+|   
++---attachments
++---core
+|       logging_config.py
+|       __init__.py
+|       
++---db
+|       manager.py
+|       models.py
+|       __init__.py
+|       
++---logs
+|       app.log
+|       
++---reports
++---security
+|       passwords.py
+|       permissions.py
+|       session.py
+|       __init__.py
+|       
++---services
+|       analytics.py
+|       import_export.py
+|       workflow_report.py
+|       __init__.py
+|       
++---ui
+|       chart_dialog.py
+|       login_dialog.py
+|       main_window.py
+|       meeting_dialog.py
+|       operations_dashboard.py
+|       splash.py
+|       style.py
+|       tracking_dialog.py
+|       user_admin_dialog.py
+|       workflow_dialog.py
+|       __init__.py
+|       
+\---utils
+        date_utils.py
+        
