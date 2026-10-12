@@ -1099,6 +1099,12 @@ class MainWindow(QMainWindow):
             brd, inp, sbb = "#475569", "#1E293B", "#1E293B"
             bd, sf = "#64748B", COLOR_SKY_BLUE
             tf, sb, sfg = "#E2E8F0", "#0369A1", "#FFFFFF"
+            focus_bg = "#263F4D"
+            secondary_bg, secondary_hover, secondary_pressed = "#334155", "#475569", "#64748B"
+            secondary_fg, secondary_hover_fg = "#E2E8F0", "#FFFFFF"
+            danger_bg, danger_border, danger_fg = "#7F1D1D", "#B91C1C", "#FEE2E2"
+            pager_bg, pager_fg, pager_hover = "#1E293B", "#E2E8F0", "#334155"
+            selection_bg, selection_fg = "#075985", "#F0F9FF"
             
             menu_style = """
                 QMenuBar { background-color: #1E293B; color: #E2E8F0; border-bottom: 1px solid #334155; font-size: 12px; }
@@ -1114,6 +1120,12 @@ class MainWindow(QMainWindow):
             brd, inp, sbb = "#CBD5E1", "#FFFFFF", "#FFFFFF"
             bd, sf = "#94A3B8", "#0284C7"
             tf, sb, sfg = "#1E293B", COLOR_SELECTION_BG, COLOR_SELECTION_FG
+            focus_bg = "#F0FDFA"
+            secondary_bg, secondary_hover, secondary_pressed = "#FFFFFF", "#F1F5F9", "#E2E8F0"
+            secondary_fg, secondary_hover_fg = "#334155", "#0F172A"
+            danger_bg, danger_border, danger_fg = "#FEE2E2", "#FCA5A5", "#991B1B"
+            pager_bg, pager_fg, pager_hover = "#FFFFFF", "#334155", "#F1F5F9"
+            selection_bg, selection_fg = "#BAE6FD", "#0C4A6E"
             
             menu_style = """
                 QMenuBar { background-color: #FFFFFF; color: #1E293B; border-bottom: 1px solid #E2E8F0; font-size: 12px; }
@@ -1133,8 +1145,8 @@ class MainWindow(QMainWindow):
                 border: 1px solid {brd};
                 border-radius:10px;
                 color:{tf};
-                selection-background-color:#BAE6FD;
-                selection-color:#0C4A6E;
+                selection-background-color:{selection_bg};
+                selection-color:{selection_fg};
                 gridline-color:transparent;
                 font-size:12.5px;
                 outline:0;
@@ -1173,7 +1185,7 @@ class MainWindow(QMainWindow):
             }}
             QLineEdit:focus, QComboBox:focus {{
                 border-color: #00ADB5;
-                background: #F0FDFA;
+                background: {focus_bg};
             }}
             QLabel {{ color:{fg_m}; font-size:12.5px; }}
             
@@ -1196,22 +1208,22 @@ class MainWindow(QMainWindow):
                 background: #1E3A8A;
             }}
             QPushButton#btn_secondary {{
-                background-color: #FFFFFF;
+                background-color: {secondary_bg};
                 border: 1px solid {brd};
-                color: #334155;
+                color: {secondary_fg};
             }}
             QPushButton#btn_secondary:hover {{
-                background-color: #F1F5F9;
-                border-color: #94A3B8;
-                color: #0F172A;
+                background-color: {secondary_hover};
+                border-color: {bd};
+                color: {secondary_hover_fg};
             }}
             QPushButton#btn_secondary:pressed {{
-                background-color: #E2E8F0;
+                background-color: {secondary_pressed};
             }}
             QPushButton#btn_danger {{
-                background-color: #FEE2E2;
-                border: 1px solid #FCA5A5;
-                color: #991B1B;
+                background-color: {danger_bg};
+                border: 1px solid {danger_border};
+                color: {danger_fg};
             }}
             QPushButton#btn_danger:hover {{
                 background-color: #EF4444;
@@ -1222,14 +1234,14 @@ class MainWindow(QMainWindow):
                 background-color: #991B1B;
             }}
             QPushButton#btn_pager {{
-                background-color: #FFFFFF;
+                background-color: {pager_bg};
                 border: 1px solid {brd};
-                color: #334155;
+                color: {pager_fg};
                 min-width: 60px;
             }}
             QPushButton#btn_pager:hover {{
-                background-color: #F1F5F9;
-                color: #0F172A;
+                background-color: {pager_hover};
+                color: {secondary_hover_fg};
             }}
             QStatusBar {{ background:{sbb}; border-top: 1px solid {brd}; }}
             QStatusBar QLabel {{ background:transparent; color:{fg_m}; }}
