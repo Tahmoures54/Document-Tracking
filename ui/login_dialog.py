@@ -65,8 +65,8 @@ class LoginDialog(QDialog):
 
         self.setWindowTitle(f"ورود – {APP_NAME}")
         self.setModal(True)
-        self.resize(480, 330)
-        self.setMinimumSize(440, 290)
+        self.resize(500, 350)
+        self.setMinimumSize(460, 320)
 
         self._build_ui()
         self._restore_geometry()
@@ -82,8 +82,8 @@ class LoginDialog(QDialog):
     # ─────────────────────────────────────────────────────────────
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
-        root.setSpacing(12)
-        root.setContentsMargins(22, 20, 22, 20)
+        root.setSpacing(15)
+        root.setContentsMargins(26, 24, 26, 22)
 
         # ── Header ──
         header = QHBoxLayout()
@@ -274,7 +274,7 @@ class LoginDialog(QDialog):
     def _apply_style(self) -> None:
         self.setStyleSheet("""
             QDialog {
-                background-color: #f8fafc;
+                background-color: #f4f7fb;
             }
             #login_title {
                 color: #0f172a;
@@ -290,28 +290,30 @@ class LoginDialog(QDialog):
                 color: #0284c7;
                 font-weight: bold;
                 background: #e0f2fe;
-                padding: 4px 10px;
-                border-radius: 6px;
+                padding: 7px 12px;
+                border-radius: 9px;
             }
             QComboBox, QLineEdit {
                 border: 1px solid #cbd5e1;
-                border-radius: 6px;
-                padding: 4px 10px;
+                border-radius: 9px;
+                padding: 7px 11px;
+                min-height: 30px;
                 background: #ffffff;
                 font-size: 12px;
                 color: #0f172a;
-                selection-background-color: #00BFFF;
+                selection-background-color: #0284c7;
                 selection-color: #ffffff;
             }
             QComboBox:focus, QLineEdit:focus {
-                border: 1.5px solid #00BFFF;
+                border: 2px solid #0284c7;
                 background: #ffffff;
             }
             QPushButton {
                 background-color: #ffffff;
                 border: 1px solid #cbd5e1;
-                border-radius: 6px;
-                padding: 6px 16px;
+                border-radius: 9px;
+                padding: 8px 16px;
+                min-height: 28px;
                 font-weight: bold;
                 font-size: 12px;
                 min-width: 68px;
@@ -331,10 +333,10 @@ class LoginDialog(QDialog):
                 border: none;
             }
             QPushButton#btn_login:hover {
-                background-color: #0099CC;
+                background-color: #0369a1;
             }
             QPushButton#btn_login:pressed {
-                background-color: #007799;
+                background-color: #075985;
             }
             QPushButton:disabled {
                 background-color: #e2e8f0;
