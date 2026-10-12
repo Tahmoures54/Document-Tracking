@@ -11,6 +11,7 @@ import hashlib
 import logging
 import os
 import sqlite3
+from contextlib import closing
 from datetime import date, datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -1067,8 +1068,10 @@ class DatabaseManager:
             if os.path.exists(temporary):
                 os.remove(temporary)
 
-            with sqlite3.connect(source_path, timeout=30) as src:
-                with sqlite3.connect(temporary, timeout=30) as dst:
+            # sqlite3.Connection context manager transaction را مدیریت می‌کند،
+            # اما اتصال را نمی‌بندد؛ closing برای آزاد شدن قفل فایل در ویندوز ضروری است.
+            with closing(sqlite3.connect(source_path, timeout=30)) as src:
+                with closing(sqlite3.connect(temporary, timeout=30)) as dst:
                     src.backup(dst)
                     result = dst.execute("PRAGMA quick_check").fetchone()
                     if not result or result[0] != "ok":
