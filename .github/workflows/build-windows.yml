@@ -43,6 +43,9 @@ jobs:
             --icon app.ico ^
             --add-data "app.ico;." ^
             --hidden-import sqlalchemy.dialects.sqlite ^
+            --hidden-import sqlalchemy.dialects.postgresql ^
+            --hidden-import psycopg ^
+            --hidden-import psycopg.pq ^
             --hidden-import jdatetime ^
             --hidden-import openpyxl ^
             --hidden-import pandas ^
