@@ -387,7 +387,8 @@ class MeetingsPageModel(QAbstractTableModel):
             v = self._cell(row, self._col_status)
             status = str(v).strip() if v else None
             if status:
-                color = (self._BG if is_bg else self._FG).get(status)
+                # وضعیت، پس‌زمینه را رنگی می‌کند؛ متن خنثی می‌ماند تا خوانا باشد.
+                color = self._BG.get(status) if is_bg else self._DEFAULT_FG
                 if color:
                     return QBrush(color)
 
@@ -866,7 +867,8 @@ class MainWindow(QMainWindow):
     def _build_table(self) -> QTableView:
         self.view = QTableView()
         self.view.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
-        self.view.setAlternatingRowColors(True)
+        # ردیف‌ها بر اساس وضعیت سند رنگ می‌گیرند؛ رنگ متناوب با این منطق تداخل دارد.
+        self.view.setAlternatingRowColors(False)
         self.view.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
         self.view.setSelectionMode(QTableView.SelectionMode.ExtendedSelection)
         self.view.setSortingEnabled(False)
@@ -1016,7 +1018,6 @@ class MainWindow(QMainWindow):
             QTableView {{
                 border: 1px solid {brd};
                 border-radius:6px;
-                background-color:{bg_t}; alternate-background-color:{bg_a};
                 color:{tf}; selection-background-color:{sb};
                 selection-color:{sfg}; gridline-color:{brd}; font-size:12px;
             }}
