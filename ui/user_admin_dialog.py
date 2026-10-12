@@ -88,8 +88,8 @@ class UserAdminDialog(QDialog):
         self.current_user_id = getattr(self.current_session, "user_id", None)
 
         self.setWindowTitle("مدیریت کاربران و تنظیمات سربرگ سازمانی")
-        self.resize(880, 580)
-        self.setMinimumSize(700, 480)
+        self.resize(920, 620)
+        self.setMinimumSize(740, 500)
         self.setModal(True)
 
         self._build_ui()
@@ -104,8 +104,8 @@ class UserAdminDialog(QDialog):
     # ─────────────────────────────────────────────────────────────
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
-        root.setContentsMargins(16, 16, 16, 14)
-        root.setSpacing(12)
+        root.setContentsMargins(20, 18, 20, 16)
+        root.setSpacing(14)
 
         # ۱. سربرگ سازمانی گزارشات
         root.addWidget(self._build_branding_section())
@@ -139,6 +139,8 @@ class UserAdminDialog(QDialog):
         hdr.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
         hdr.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
 
+        self.table.verticalHeader().setDefaultSectionSize(36)
+        self.table.setShowGrid(False)
         root.addWidget(self.table, stretch=1)
 
         # ۴. دکمه‌های عملیاتی پایین
