@@ -1224,5 +1224,41 @@ class MeetingDialog(QDialog):
                 background: #94a3b8; border-radius: 4px;
             }
             QScrollBar::handle:vertical:hover { background: #64748b; }
+
+            /* ریزتنظیم فرم ثبت صورتجلسه */
+            QLineEdit, QComboBox, QSpinBox {
+                min-height: 34px;
+                padding: 6px 12px;
+                border: 1px solid #cbd5e1;
+                border-radius: 9px;
+                background-color: #ffffff;
+            }
+            QLineEdit:hover, QComboBox:hover, QSpinBox:hover {
+                border-color: #94a3b8;
+            }
+            QLineEdit:focus, QComboBox:focus, QSpinBox:focus {
+                border: 2px solid #00a8d8;
+                background-color: #fafdff;
+            }
+            QLabel#header_title {
+                font-size: 17px;
+                padding: 3px 0 7px 0;
+                color: #075985;
+            }
+            QPushButton {
+                min-height: 34px;
+                padding: 7px 19px;
+                border-radius: 9px;
+            }
+            QPushButton#btn_save {
+                background-color: #009fce;
+                font-weight: bold;
+            }
+            QPushButton#btn_save:hover { background-color: #007fa8; }
+            QToolButton {
+                border-radius: 8px;
+                padding: 5px 9px;
+            }
+            QScrollBar::handle:vertical { min-height: 28px; }
             """
         )
