@@ -1450,7 +1450,9 @@ class MainWindow(QMainWindow):
 
             # وضعیت رنگ ردیف را از زنجیره واقعی گام‌ها محاسبه می‌کنیم.
             # سبز فقط وقتی مجاز است که همه گام‌ها تکمیل و ابلاغ ثبت شده باشد.
-            if not m_steps:
+            if m.status == STATUS_CANCELLED:
+                workflow_states[m.id] = "cancelled"
+            elif not m_steps:
                 workflow_states[m.id] = "pending"
             elif any(s.status == "rejected" for s in m_steps):
                 workflow_states[m.id] = "returned"
