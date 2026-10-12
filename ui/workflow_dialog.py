@@ -2,9 +2,12 @@
 """
 ui.workflow_dialog
 ماژول هوشمند مدیریت گردش کار صورتجلسه و مانیتورینگ پیشرفت کار تیمی
-نسخه ۳.۱: طراحی بدون تأیید خسته‌کننده، Undo هوشمند، Toast بصری
-(بهسازی‌شده بر اساس تحلیل: رفع باگ Undo با قانون طلایی، کش QFont،
- debounce روی تغییر مسئول، Dialog جزئیات سفارشی، ثابت‌های تم مرکزی)
+نسخه ۴.۰ — بازطراحی کامل رابط کاربری:
+    • سربرگ فشرده به‌صورت نوار کارت اطلاعاتی افقی (راست‌چین)
+    • جدول با ۶ ستون (ادغام تاریخ‌ها و حذف ستون امضای مستقل)
+    • ترازبندی صحیح RTL در تمام سلول‌ها
+    • کنتراست بهتر و خوانایی بالاتر
+    • حفظ کامل API عمومی و منطق گردش کار
 """
 from __future__ import annotations
 
@@ -37,10 +40,8 @@ from PyQt6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFileDialog,
-    QFormLayout,
     QFrame,
     QGraphicsOpacityEffect,
-    QGroupBox,
     QHBoxLayout,
     QHeaderView,
     QInputDialog,
@@ -67,15 +68,15 @@ from utils.date_utils import to_shamsi, today_shamsi
 logger = logging.getLogger(__name__)
 
 # ═══════════════════════════════════════════════
-#  تنظیمات و ثابت‌های تم مرکزی (تنها منبع حقیقت رنگ‌ها)
+#  تنظیمات و ثابت‌های تم مرکزی
 # ═══════════════════════════════════════════════
 UI_FONT_NAME = "Vazirmatn"
 UI_FONT_SIZE = 10
 
-UNDO_TIMEOUT_MS = 6_000  # مهلت undo به میلی‌ثانیه
-RESP_CHANGE_DEBOUNCE_MS = 350  # تأخیر ذخیره تغییر مسئول
+UNDO_TIMEOUT_MS = 6_000
+RESP_CHANGE_DEBOUNCE_MS = 350
 
-# پالت رنگ — تنها نقطه تعریف
+# پالت رنگ
 COLOR_SUCCESS = "#10b981"
 COLOR_DANGER = "#ef4444"
 COLOR_WARNING = "#f59e0b"
@@ -92,25 +93,18 @@ STEP_STATUS_COLORS: Dict[str, QColor] = {
     "rejected":    QColor("#ef4444"),
 }
 
-# وضعیت‌ها با ترجمه و آیکون در یک ساختار واحد
+# وضعیت‌ها با ترجمه و آیکون
 STEP_STATUS_INFO: Dict[str, Tuple[str, str]] = {
-    # status: (icon, label_fa)
     "pending":     ("⏳", "آماده اقدام"),
     "in_progress": ("🔄", "در حال اقدام"),
     "completed":   ("✅", "تکمیل شد"),
     "rejected":    ("❌", "عودت برای اصلاح"),
-    "skipped":     ("⏭️", "رد شده / اجرا نشده"),
+    "skipped":     ("⏭️", "رد شده"),
 }
 
 
 @lru_cache(maxsize=32)
-def _make_font_cached(
-    weight_value: int, size: int
-) -> QFont:
-    """
-    کش‌شده — ساخت QFont گران است و در paint مکرر صدا زده می‌شود.
-    `weight_value` به‌صورت int نگه داشته می‌شود چون QFont.Weight hashable نیست در lru_cache.
-    """
+def _make_font_cached(weight_value: int, size: int) -> QFont:
     f = QFont(UI_FONT_NAME, size)
     try:
         f.setWeight(QFont.Weight(weight_value))
@@ -122,11 +116,10 @@ def _make_font_cached(
 def get_font(
     weight: QFont.Weight = QFont.Weight.Normal, size_offset: int = 0
 ) -> QFont:
-    """دریافت QFont کش‌شده برای جلوگیری از سربار ساخت."""
     return _make_font_cached(int(weight.value), UI_FONT_SIZE + size_offset)
 
 
-# نام‌های نمایشی روشن‌تر برای پرونده‌های قدیمی؛ نام ذخیره‌شده و سوابق تغییر نمی‌کنند.
+# نام‌های نمایشی گام‌ها
 STEP_NAME_LABELS: Dict[str, str] = {
     "دریافت در دفتر کارفرما": "۱. ثبت و دریافت صورتجلسه در دفتر کارفرما",
     "ارجاع به رئیس دفتر فنی": "۲. ارجاع پرونده به رئیس دفتر فنی",
@@ -136,35 +129,143 @@ STEP_NAME_LABELS: Dict[str, str] = {
     "ابلاغ به پیمانکار": "۶. ابلاغ رسمی به پیمانکار و بستن پرونده",
 }
 
-# ایندکس ستون‌ها
-COL_IDX = 0
-COL_NAME = 1
-COL_STATUS = 2
-COL_ENTRY = 3
-COL_EXIT = 4
-COL_RESP = 5
-COL_SIGN = 6
-COL_NOTES = 7
-COL_COUNT = 8
+# ═══════════════════════════════════════════════
+# ایندکس ستون‌های جدول (نسخه فشرده ۶ ستونی)
+# ═══════════════════════════════════════════════
+COL_IDX = 0     # #
+COL_NAME = 1    # مرحله
+COL_STATUS = 2  # وضعیت
+COL_DATES = 3   # بازه زمانی (ورود ← خروج)
+COL_RESP = 4    # مسئول اقدام (Combo)
+COL_NOTES = 5   # یادداشت
+COL_COUNT = 6
+
+# عرض‌های از پیش تعیین‌شده (به پیکسل)
+COL_WIDTHS = {
+    COL_IDX: 38,
+    COL_STATUS: 110,
+    COL_DATES: 175,
+    COL_RESP: 140,
+}
+
+# طول پیش‌نمایش متن‌های بلند
+SUBJECT_PREVIEW_LENGTH = 55
+NOTES_PREVIEW_LENGTH = 70
 
 
 def _status_label(status: str) -> str:
-    """دریافت متن نمایشی وضعیت (پیش‌فرض امن)."""
     info = STEP_STATUS_INFO.get(status)
     return info[1] if info else (status or "نامشخص")
 
 
 def _status_icon(status: str) -> str:
-    """دریافت آیکون وضعیت (پیش‌فرض امن)."""
     info = STEP_STATUS_INFO.get(status)
     return info[0] if info else ""
 
 
 # ═══════════════════════════════════════════════
-#  Toast — نوار اطلاع‌رسانی موقت با قابلیت Undo
+#  استایل مرکزی دیالوگ
 # ═══════════════════════════════════════════════
+_DIALOG_STYLESHEET = """
+    QDialog {
+        background-color: #f1f5f9;
+        font-family: 'Vazirmatn', 'Tahoma', Arial, sans-serif;
+    }
+
+    /* ── نوار اطلاعات ── */
+    QFrame#info_bar {
+        background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+            stop:0 #0f172a, stop:0.5 #1e293b, stop:1 #334155);
+        border-radius: 12px;
+    }
+    QFrame#info_chip {
+        background: rgba(255,255,255,0.06);
+        border: 1px solid rgba(255,255,255,0.10);
+        border-radius: 8px;
+    }
+    QFrame#info_chip:hover {
+        background: rgba(255,255,255,0.10);
+    }
+    QFrame#info_bar QLabel#chip_label {
+        color: #94a3b8;
+        font-size: 10px;
+        font-weight: bold;
+        background: transparent;
+    }
+    QFrame#info_bar QLabel#chip_value {
+        color: #f1f5f9;
+        font-size: 12.5px;
+        font-weight: bold;
+        background: transparent;
+    }
+
+    /* ── نوار پیشرفت ── */
+    QProgressBar {
+        border: none;
+        border-radius: 8px;
+        background: #e2e8f0;
+        text-align: center;
+        color: #0f172a;
+        font-weight: bold;
+        font-size: 11px;
+        min-height: 22px;
+        max-height: 22px;
+    }
+    QProgressBar::chunk {
+        background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+            stop:0 #3b82f6, stop:1 #10b981);
+        border-radius: 8px;
+    }
+
+    /* ── جدول ── */
+    QTableWidget {
+        background: #ffffff;
+        border: 1px solid #e2e8f0;
+        border-radius: 10px;
+        gridline-color: #f1f5f9;
+        alternate-background-color: #f8fafc;
+        selection-background-color: #dbeafe;
+        selection-color: #1e40af;
+        outline: none;
+        font-size: 12px;
+    }
+    QTableWidget::item {
+        padding: 8px 6px;
+        border: none;
+    }
+    QTableWidget::item:selected {
+        background-color: #dbeafe;
+        color: #1e40af;
+    }
+
+    QHeaderView::section {
+        background-color: #1e293b;
+        color: #ffffff;
+        padding: 10px 8px;
+        border: none;
+        border-left: 1px solid #334155;
+        font-weight: bold;
+        font-size: 11.5px;
+    }
+    QHeaderView::section:first {
+        border-right: 1px solid #334155;
+    }
+
+    /* ── نوار وضعیت ── */
+    QLabel#status_label {
+        background: #ffffff;
+        border: 1px solid #cbd5e1;
+        border-radius: 8px;
+        padding: 8px 14px;
+        font-size: 12px;
+        font-weight: bold;
+    }
+"""
 
 
+# ═══════════════════════════════════════════════
+#  Toast — نوار اطلاع‌رسانی موقت با Undo
+# ═══════════════════════════════════════════════
 class _Toast(QFrame):
     """نوار اطلاع‌رسانی موقتی که پایین دیالوگ ظاهر و محو می‌شود."""
 
@@ -294,10 +395,8 @@ class _Toast(QFrame):
 
 
 # ═══════════════════════════════════════════════
-#  StepDetailDialog — نمایش جزئیات گام (جایگزین QMessageBox)
+#  StepDetailDialog — نمایش جزئیات گام
 # ═══════════════════════════════════════════════
-
-
 class StepDetailDialog(QDialog):
     """دیالوگ جزئیات گام با پشتیبانی از یادداشت‌های طولانی."""
 
@@ -324,7 +423,7 @@ class StepDetailDialog(QDialog):
         st = _status_label(step.status)
 
         info = QLabel(
-            f"<div style='line-height:1.9'>"
+            f"<div style='line-height:1.9' dir='rtl'>"
             f"<b>{ic} {self._step_label_safe(step)}</b><br>"
             f"<b>وضعیت:</b> {st}<br>"
             f"<b>📅 ورود:</b> {entry}<br>"
@@ -334,17 +433,20 @@ class StepDetailDialog(QDialog):
             f"</div>"
         )
         info.setTextFormat(Qt.TextFormat.RichText)
+        info.setAlignment(Qt.AlignmentFlag.AlignRight)
         info.setFont(get_font())
         layout.addWidget(info)
 
         notes_label = QLabel("📝 یادداشت:")
         notes_label.setFont(get_font(QFont.Weight.Bold))
+        notes_label.setAlignment(Qt.AlignmentFlag.AlignRight)
         layout.addWidget(notes_label)
 
         notes_view = QTextEdit()
         notes_view.setPlainText(step.notes or "—")
         notes_view.setReadOnly(True)
         notes_view.setFont(get_font())
+        notes_view.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
         layout.addWidget(notes_view, stretch=1)
 
         btn_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
@@ -361,8 +463,6 @@ class StepDetailDialog(QDialog):
 # ═══════════════════════════════════════════════
 #  PerformanceReportDialog — گزارش عملکرد
 # ═══════════════════════════════════════════════
-
-
 class PerformanceReportDialog(QDialog):
     """دیالوگ نمایش مصور عملکرد کارشناسان."""
 
@@ -463,6 +563,10 @@ class PerformanceReportDialog(QDialog):
                 item = QTableWidgetItem(str(text))
                 if center:
                     item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                else:
+                    item.setTextAlignment(
+                        Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+                    )
                 if bold:
                     item.setFont(get_font(QFont.Weight.Bold))
                 return item
@@ -487,15 +591,8 @@ class PerformanceReportDialog(QDialog):
             with open(path, "w", newline="", encoding="utf-8-sig") as f:
                 w = csv.writer(f)
                 w.writerow(
-                    [
-                        "کاربر",
-                        "کل",
-                        "تکمیل",
-                        "درحال‌اقدام",
-                        "انتظار",
-                        "ردشده",
-                        "میانگین‌روز",
-                    ]
+                    ["کاربر", "کل", "تکمیل", "درحال‌اقدام",
+                     "انتظار", "ردشده", "میانگین‌روز"]
                 )
                 for r in self.data:
                     w.writerow(
@@ -518,57 +615,14 @@ class PerformanceReportDialog(QDialog):
 
 
 # ═══════════════════════════════════════════════
-#  WorkflowDialog — دیالوگ اصلی گردش کار
+#  WorkflowDialog — دیالوگ اصلی (بازطراحی‌شده)
 # ═══════════════════════════════════════════════
-
-
 class WorkflowDialog(QDialog):
-    """دیالوگ جامع مدیریت گردش کار — بدون تأیید خسته‌کننده، با Undo هوشمند."""
-
-    _STYLESHEET = """
-        QDialog {
-            background-color: #f4f7fb;
-            font-family: 'Vazirmatn', 'Tahoma', Arial, sans-serif;
-        }
-        QGroupBox {
-            font-weight: bold; color: #0f172a;
-            border: 1px solid #d7e1ec; border-radius: 11px;
-            margin-top: 15px; padding: 20px 12px 12px 12px;
-            background-color: #ffffff;
-        }
-        QGroupBox::title {
-            subcontrol-origin: margin; subcontrol-position: top right;
-            padding: 0 8px; color: #0369a1; background: #ffffff;
-        }
-        QTableWidget {
-            border: 1px solid #d7e1ec; border-radius: 10px;
-            gridline-color: #edf2f7; background-color: #ffffff;
-            alternate-background-color: #f8fafc;
-            selection-background-color: #dbeafe;
-            selection-color: #1e40af; outline: none;
-        }
-        QHeaderView::section {
-            background-color: #1e293b; color: white;
-            padding: 10px 8px; border: none; font-weight: bold;
-        }
-        QTableWidget::item { padding: 8px 7px; }
-        QTableWidget::item:selected { background-color: #dbeafe; color: #1e40af; }
-        QLabel { color: #0f172a; }
-        QComboBox {
-            border: 1px solid #cbd5e1; border-radius: 8px;
-            padding: 6px 9px; min-height: 28px; background-color: #ffffff;
-        }
-        QComboBox:hover { border-color: #94a3b8; }
-        QComboBox:focus { border: 2px solid #3b82f6; }
-        QComboBox::drop-down { border: none; width: 24px; }
-        QComboBox QAbstractItemView {
-            border: 1px solid #94a3b8; background: #fff;
-            selection-background-color: #3b82f6; selection-color: #fff;
-        }
-        QPushButton {
-            border-radius: 8px; padding: 7px 14px; min-height: 30px;
-        }
-        QPushButton:focus { border: 2px solid #60a5fa; }
+    """
+    دیالوگ جامع مدیریت گردش کار — بازطراحی‌شده با:
+      • نوار اطلاعات فشرده افقی
+      • جدول ۶ ستونی راست‌چین
+      • دکمه‌های گروه‌بندی‌شده
     """
 
     def __init__(
@@ -585,9 +639,9 @@ class WorkflowDialog(QDialog):
 
         self.settings = QSettings(ORG_NAME, APP_NAME)
         self._selected_step_id: Optional[int] = None
-        self._cursor_depth: int = 0  # برای reentrancy امن در _with_wait_cursor
+        self._cursor_depth: int = 0
 
-        # Debounce برای ذخیره تغییر مسئول
+        # Debounce تغییر مسئول
         self._resp_save_timer = QTimer(self)
         self._resp_save_timer.setSingleShot(True)
         self._resp_save_timer.setInterval(RESP_CHANGE_DEBOUNCE_MS)
@@ -601,21 +655,23 @@ class WorkflowDialog(QDialog):
         self.resize(1080, 720)
         self.setMinimumSize(880, 580)
         self.setModal(True)
-        self.setStyleSheet(self._STYLESHEET)
+        self.setStyleSheet(_DIALOG_STYLESHEET)
 
         self._build_ui()
         self._restore_geometry()
         self._load_active_users()
         self._load_steps()
 
-    # ── ساختار رابط ──
+    # ════════════════════════════════════════════
+    #  ساخت رابط کاربری
+    # ════════════════════════════════════════════
 
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
-        root.setContentsMargins(18, 16, 18, 14)
-        root.setSpacing(12)
+        root.setContentsMargins(16, 14, 16, 12)
+        root.setSpacing(10)
 
-        root.addWidget(self._build_header())
+        root.addWidget(self._build_info_bar())
         root.addWidget(self._build_progress_bar())
         root.addWidget(self._build_table(), stretch=1)
         root.addLayout(self._build_action_buttons())
@@ -626,100 +682,108 @@ class WorkflowDialog(QDialog):
         self._connect_signals()
         self._setup_shortcuts()
 
-    def _build_header(self) -> QGroupBox:
-        box = QGroupBox("اطلاعات پرونده")
-        box.setFont(get_font(QFont.Weight.Bold))
-        form = QFormLayout(box)
-        form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
-        form.setVerticalSpacing(4)
-        form.setHorizontalSpacing(14)
+    # ─────────────────────────────────────────
+    #  نوار اطلاعات (کارت‌های افقی)
+    # ─────────────────────────────────────────
+    def _build_info_bar(self) -> QFrame:
+        bar = QFrame()
+        bar.setObjectName("info_bar")
+        bar.setMinimumHeight(62)
+        bar.setMaximumHeight(70)
 
-        def lbl(text: str, bold: bool = False) -> QLabel:
-            la = QLabel(text or "—")
-            la.setTextInteractionFlags(
-                Qt.TextInteractionFlag.TextSelectableByMouse
-            )
-            la.setFont(
-                get_font(QFont.Weight.Bold if bold else QFont.Weight.Normal)
-            )
-            return la
+        layout = QHBoxLayout(bar)
+        layout.setContentsMargins(12, 8, 12, 8)
+        layout.setSpacing(8)
 
         md = (
             to_shamsi(self.meeting.meeting_date.isoformat())
             if self.meeting.meeting_date
             else "—"
         )
-        form.addRow("شماره:", lbl(self.meeting.meeting_number, True))
-        form.addRow("موضوع:", lbl(self.meeting.subject))
-        form.addRow("پیمانکار:", lbl(self.meeting.contractor or "—"))
-        form.addRow("تاریخ:", lbl(md))
-        tip = QLabel(
-            "روش کار: مرحله جاری را انتخاب کنید؛ «شروع اقدام» را بزنید و پس از "
-            "انجام کار، «تکمیل مرحله» را ثبت کنید. اگر نقصی وجود دارد، "
-            "«عودت برای اصلاح» را همراه با علت ثبت کنید."
-        )
-        tip.setStyleSheet(
-            f"color: {COLOR_NEUTRAL}; font-size: 11px; font-style: italic;"
-        )
-        tip.setWordWrap(True)
-        form.addRow(tip)
-        return box
 
+        subject_text = self.meeting.subject or "—"
+        if len(subject_text) > SUBJECT_PREVIEW_LENGTH:
+            subject_text = subject_text[:SUBJECT_PREVIEW_LENGTH] + "…"
+
+        def _chip(icon: str, label: str, value: str) -> QFrame:
+            f = QFrame()
+            f.setObjectName("info_chip")
+            v = QVBoxLayout(f)
+            v.setContentsMargins(10, 6, 10, 6)
+            v.setSpacing(1)
+
+            lbl = QLabel(f"{icon}  {label}")
+            lbl.setObjectName("chip_label")
+            lbl.setAlignment(
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+            )
+            lbl.setFont(get_font(QFont.Weight.Bold, -1))
+
+            val = QLabel(value or "—")
+            val.setObjectName("chip_value")
+            val.setAlignment(
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+            )
+            val.setFont(get_font(QFont.Weight.Bold))
+            val.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+
+            v.addWidget(lbl)
+            v.addWidget(val)
+            return f
+
+        layout.addWidget(_chip("🔖", "شماره", self.meeting.meeting_number or "—"))
+        layout.addWidget(_chip("📅", "تاریخ", md))
+        layout.addWidget(_chip("🏗️", "پیمانکار", self.meeting.contractor or "—"))
+        layout.addWidget(_chip("📋", "موضوع", subject_text), stretch=1)
+
+        return bar
+
+    # ─────────────────────────────────────────
+    #  نوار پیشرفت
+    # ─────────────────────────────────────────
     def _build_progress_bar(self) -> QProgressBar:
         self.progress = QProgressBar()
         self.progress.setFixedHeight(22)
         self.progress.setTextVisible(True)
-        self.progress.setFormat("%v از %m گام (%p٪)")
+        self.progress.setFormat("پیشرفت %p٪  —  %v از %m گام")
         self.progress.setFont(get_font(QFont.Weight.Bold, -1))
-        self.progress.setStyleSheet(
-            """
-            QProgressBar {
-                border: 1px solid #cbd5e1; border-radius: 6px;
-                background: #f1f5f9; text-align: center; color: #1e293b;
-            }
-            QProgressBar::chunk {
-                background: qlineargradient(
-                    x1:0, y1:0, x2:1, y2:0,
-                    stop:0 #3b82f6, stop:1 #10b981
-                );
-                border-radius: 5px;
-            }
-        """
-        )
         return self.progress
 
+    # ─────────────────────────────────────────
+    #  جدول (۶ ستونی فشرده)
+    # ─────────────────────────────────────────
     def _build_table(self) -> QTableWidget:
         self.table = QTableWidget()
         self.table.setColumnCount(COL_COUNT)
-        self.table.setHorizontalHeaderLabels(
-            [
-                "ردیف",
-                "مرحله / اقدام مورد انتظار",
-                "وضعیت",
-                "تاریخ شروع",
-                "تاریخ پایان",
-                "مسئول اقدام",
-                "ثبت‌کننده / امضا",
-                "یادداشت و علت عودت",
-            ]
-        )
+        self.table.setHorizontalHeaderLabels([
+            "#",
+            "مرحله / اقدام مورد انتظار",
+            "وضعیت",
+            "بازه زمانی (ورود ← خروج)",
+            "مسئول اقدام",
+            "یادداشت / علت عودت",
+        ])
         self.table.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
 
         hdr = self.table.horizontalHeader()
-        hdr.setFont(get_font(QFont.Weight.Bold))
+        hdr.setFont(get_font(QFont.Weight.Bold, -1))
+        hdr.setFixedHeight(38)
+        hdr.setDefaultAlignment(Qt.AlignmentFlag.AlignCenter)
+        hdr.setHighlightSections(False)
 
-        # ترتیب منطقی: اول Stretch ها، سپس ResizeToContents و Fixed
-        # (از فشردگی عرض Fixed روی Stretch جلوگیری می‌کند)
+        # ── تنظیم عرض: Fixed برای عددی‌ها، Stretch برای متنی‌ها ──
         for col in (COL_NAME, COL_NOTES):
             hdr.setSectionResizeMode(col, QHeaderView.ResizeMode.Stretch)
+        for col in COL_WIDTHS:
+            hdr.setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
+            self.table.setColumnWidth(col, COL_WIDTHS[col])
 
-        for col in (COL_STATUS, COL_ENTRY, COL_EXIT, COL_RESP, COL_SIGN):
-            hdr.setSectionResizeMode(col, QHeaderView.ResizeMode.ResizeToContents)
-
-        hdr.setSectionResizeMode(COL_IDX, QHeaderView.ResizeMode.Fixed)
-        self.table.setColumnWidth(COL_IDX, 42)
+        # حداقل عرض برای ستون‌های Stretch
+        self.table.setColumnWidth(COL_NAME, 240)
+        self.table.setColumnWidth(COL_NOTES, 160)
 
         self.table.verticalHeader().setVisible(False)
+        self.table.verticalHeader().setDefaultSectionSize(42)
         self.table.setAlternatingRowColors(True)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.setSelectionBehavior(
@@ -731,15 +795,19 @@ class WorkflowDialog(QDialog):
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.table.setWordWrap(True)
         self.table.setFont(get_font())
+        self.table.setShowGrid(False)
         return self.table
 
+    # ─────────────────────────────────────────
+    #  دکمه‌ها (گروه‌بندی منطقی)
+    # ─────────────────────────────────────────
     def _build_action_buttons(self) -> QVBoxLayout:
-        """دو ردیف جدا برای عملیات اصلی و ابزارهای کمکی."""
         rows = QVBoxLayout()
         rows.setSpacing(6)
+
         primary = QHBoxLayout()
-        secondary = QHBoxLayout()
         primary.setSpacing(6)
+        secondary = QHBoxLayout()
         secondary.setSpacing(6)
 
         def _btn(attr, text, tip, bg="#ffffff", fg="#0f172a", target=primary):
@@ -748,13 +816,13 @@ class WorkflowDialog(QDialog):
             b.setFont(get_font(QFont.Weight.Bold, -1))
             b.setCursor(Qt.CursorShape.PointingHandCursor)
             b.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
-            b.setMinimumHeight(36)
+            b.setMinimumHeight(34)
             b.setStyleSheet(
                 f"""
                 QPushButton {{
                     background: {bg}; color: {fg};
-                    border: 1px solid #cbd5e1; border-radius: 6px;
-                    padding: 4px 12px;
+                    border: 1px solid #cbd5e1; border-radius: 8px;
+                    padding: 4px 14px;
                 }}
                 QPushButton:hover {{ background: #e2e8f0; }}
                 QPushButton:pressed {{ background: #cbd5e1; }}
@@ -767,45 +835,50 @@ class WorkflowDialog(QDialog):
             setattr(self, attr, b)
             target.addWidget(b)
 
-        # ردیف اول: کارهای اصلی گردش سند
+        # ── ردیف اصلی: گردش سند ──
         _btn("btn_entry", "▶ شروع اقدام", "Ctrl+E", "#dbeafe", "#1e40af")
         _btn("btn_exit", "✓ تکمیل مرحله", "Ctrl+X", "#d1fae5", "#065f46")
         _btn(
             "btn_reject", "↩ عودت برای اصلاح",
-            "ثبت علت نقص و بازگرداندن مرحله جاری برای اصلاح",
+            "ثبت علت نقص و بازگرداندن مرحله جاری",
             "#ffedd5", "#9a3412",
         )
-        _btn("btn_reopen", "🔄 ادامه پس از اصلاح", "بازگشایی مرحله عودت‌شده  Ctrl+B")
+        _btn("btn_reopen", "🔄 ادامه پس از اصلاح", "بازگشایی مرحله عودت‌شده  Ctrl+B",
+             "#e0f2fe", "#0369a1")
         _btn("btn_prev", "↶ بازگردانی مرحله", "لغو گام و بازگشت به مرحله قبل")
         primary.addStretch()
 
-        # ردیف دوم: ابزارهای کمکی و گزارش‌ها
+        # ── ردیف فرعی: ابزارها ──
         _btn("btn_notes", "📝 یادداشت", "Ctrl+N", target=secondary)
         _btn("btn_perf", "📊 عملکرد", "گزارش آماری کارشناسان", target=secondary)
-        _btn("btn_print", "🖨 چاپ گردش کار", "Ctrl+P", target=secondary)
+        _btn("btn_print", "🖨 چاپ", "Ctrl+P", target=secondary)
         _btn("btn_refresh", "↻ بروزرسانی", "F5", target=secondary)
         secondary.addStretch()
-        _btn("btn_close", "بستن", "Escape", "#fee2e2", "#991b1b", secondary)
+        _btn(
+            "btn_close", "بستن", "Escape",
+            "#fee2e2", "#991b1b", secondary,
+        )
 
         rows.addLayout(primary)
         rows.addLayout(secondary)
         return rows
 
+    # ─────────────────────────────────────────
+    #  نوار وضعیت پایین
+    # ─────────────────────────────────────────
     def _build_status_bar(self) -> QLabel:
         self.lbl_status = QLabel("⏳ در انتظار آغاز …")
-        self.lbl_status.setAlignment(Qt.AlignmentFlag.AlignVCenter)
-        self.lbl_status.setFont(get_font(QFont.Weight.Bold))
-        self.lbl_status.setStyleSheet(
-            """
-            QLabel {
-                background: #fff; border: 1px solid #cbd5e1;
-                border-radius: 8px; padding: 8px 14px; color: #1d4ed8;
-            }
-        """
+        self.lbl_status.setObjectName("status_label")
+        self.lbl_status.setAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
         )
+        self.lbl_status.setFont(get_font(QFont.Weight.Bold))
+        self.lbl_status.setMinimumHeight(34)
         return self.lbl_status
 
-    # ── سیگنال‌ها و میانبرها ──
+    # ════════════════════════════════════════════
+    #  سیگنال‌ها و میانبرها
+    # ════════════════════════════════════════════
 
     def _connect_signals(self) -> None:
         self.btn_entry.clicked.connect(self.entry_step)
@@ -838,20 +911,16 @@ class WorkflowDialog(QDialog):
             a.triggered.connect(slot)
             self.addAction(a)
 
-    # ── ذخیره / بازیابی هندسه ──
-
+    # ── هندسه ──
     def _restore_geometry(self) -> None:
         g = self.settings.value("workflow_dialog_geometry")
         if g:
             self.restoreGeometry(g)
 
     def _save_geometry(self) -> None:
-        self.settings.setValue(
-            "workflow_dialog_geometry", self.saveGeometry()
-        )
+        self.settings.setValue("workflow_dialog_geometry", self.saveGeometry())
 
     def closeEvent(self, event: QCloseEvent) -> None:
-        # ذخیره تغییر مسئول در انتظار (اگر debounce هنوز در جریان است)
         self._flush_resp_change()
         self._save_geometry()
         super().closeEvent(event)
@@ -867,7 +936,6 @@ class WorkflowDialog(QDialog):
             self.toast._reposition()
 
     # ── دسترسی ──
-
     def _init_session(self, parent: Optional[QWidget]) -> None:
         ps = getattr(parent, "session", None)
         if ps:
@@ -886,19 +954,11 @@ class WorkflowDialog(QDialog):
 
     def _need_write(self) -> bool:
         if not self._has_perm(PERM_REPORT_WRITE):
-            self.toast.show_message(
-                "⛔ دسترسی ویرایش ندارید", color=COLOR_DANGER
-            )
+            self.toast.show_message("⛔ دسترسی ویرایش ندارید", color=COLOR_DANGER)
             return False
         return True
 
-    # ── اجرای امن با cursor انتظار (reentrancy-aware) ──
-
     def _with_wait_cursor(self, fn) -> None:
-        """
-        اجرای یک تابع با نشانگر انتظار.
-        در صورت فراخوانی تودرتو، فقط سطح بیرونی cursor را override می‌کند.
-        """
         self._cursor_depth += 1
         if self._cursor_depth == 1:
             QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
@@ -910,7 +970,6 @@ class WorkflowDialog(QDialog):
                 QApplication.restoreOverrideCursor()
 
     # ── بارگذاری داده ──
-
     def _load_active_users(self) -> None:
         try:
             self.active_users = self.db.active_usernames()
@@ -924,9 +983,7 @@ class WorkflowDialog(QDialog):
 
     def _load_steps(self) -> None:
         prev = self._get_selected_step()
-        self._selected_step_id = (
-            prev.id if prev else self._selected_step_id
-        )
+        self._selected_step_id = prev.id if prev else self._selected_step_id
 
         def _do():
             self._load_active_users()
@@ -961,10 +1018,11 @@ class WorkflowDialog(QDialog):
         if self.steps:
             self.table.selectRow(0)
 
-    # ── پرکردن جدول ──
+    # ════════════════════════════════════════════
+    #  پرکردن جدول (فشرده و راست‌چین)
+    # ════════════════════════════════════════════
 
     def _populate_table(self) -> None:
-        # قبل از reset، comboboxهای قبلی را پاک می‌کنیم تا از نشت منابع جلوگیری شود
         self.table.clearContents()
         self.table.setRowCount(len(self.steps))
         for i, step in enumerate(self.steps):
@@ -976,64 +1034,128 @@ class WorkflowDialog(QDialog):
         name = (step.step_name or "").strip()
         return STEP_NAME_LABELS.get(name, name)
 
+    def _make_item(
+        self,
+        text: str,
+        *,
+        align: Qt.AlignmentFlag = Qt.AlignmentFlag.AlignRight,
+        bold: bool = False,
+        bg: Optional[QBrush] = None,
+        fg: Optional[QBrush] = None,
+    ) -> QTableWidgetItem:
+        it = QTableWidgetItem(text)
+        it.setFont(
+            get_font(QFont.Weight.Bold if bold else QFont.Weight.Normal)
+        )
+        it.setTextAlignment(align | Qt.AlignmentFlag.AlignVCenter)
+        if bg:
+            it.setBackground(bg)
+        if fg:
+            it.setForeground(fg)
+        return it
+
     def _set_row(self, row: int, step: WorkflowStep) -> None:
         sc = STEP_STATUS_COLORS.get(step.status)
-        bg = QBrush(sc.lighter(185)) if sc else QBrush()
-        fg = QBrush(sc.darker(160)) if sc else QBrush()
+        bg = QBrush(sc.lighter(190)) if sc else QBrush()
+        fg = QBrush(sc.darker(170)) if sc else QBrush()
 
-        def cell(text: str, center=True, bold=False):
-            it = QTableWidgetItem(text)
-            it.setFont(
-                get_font(QFont.Weight.Bold if bold else QFont.Weight.Normal)
-            )
-            if center:
-                it.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            if sc:
-                it.setBackground(bg)
-                it.setForeground(fg)
-            return it
+        # ── ستون # (مرکز) ──
+        idx_item = self._make_item(
+            str(row + 1),
+            align=Qt.AlignmentFlag.AlignCenter,
+            bg=bg, fg=fg,
+        )
+        idx_item.setFont(get_font(QFont.Weight.Bold))
+        self.table.setItem(row, COL_IDX, idx_item)
 
+        # ── ستون مرحله (راست‌چین + آیکون) ──
+        icon = _status_icon(step.status)
+        step_name = self._step_label(step)
+        name_item = self._make_item(
+            f"{icon}  {step_name}",
+            align=Qt.AlignmentFlag.AlignRight,
+            bold=True, bg=bg, fg=fg,
+        )
+        name_item.setToolTip(step_name)
+        self.table.setItem(row, COL_NAME, name_item)
+
+        # ── ستون وضعیت (مرکز) ──
+        status_text = _status_label(step.status)
+        status_item = self._make_item(
+            f"{icon} {status_text}",
+            align=Qt.AlignmentFlag.AlignCenter,
+            bold=True, bg=bg, fg=fg,
+        )
+        self.table.setItem(row, COL_STATUS, status_item)
+
+        # ── ستون بازه زمانی (راست‌چین) ──
         entry = (
-            to_shamsi(step.entry_date.isoformat()) if step.entry_date else ""
+            to_shamsi(step.entry_date.isoformat()) if step.entry_date else None
         )
         exit_ = (
-            to_shamsi(step.exit_date.isoformat()) if step.exit_date else ""
+            to_shamsi(step.exit_date.isoformat()) if step.exit_date else None
         )
-        icon = _status_icon(step.status)
+        if entry and exit_:
+            period = f"{entry}  ←  {exit_}"
+        elif entry:
+            period = f"ورود: {entry}"
+        elif exit_:
+            period = f"خروج: {exit_}"
+        else:
+            period = "—"
+        period_item = self._make_item(
+            period,
+            align=Qt.AlignmentFlag.AlignRight,
+            bg=bg, fg=fg,
+        )
+        self.table.setItem(row, COL_DATES, period_item)
 
-        self.table.setItem(row, COL_IDX, cell(str(row + 1)))
-        name_it = cell(f"{icon} {self._step_label(step)}", False, True)
-        name_it.setToolTip(self._step_label(step))
-        self.table.setItem(row, COL_NAME, name_it)
-        status_text = _status_label(step.status)
-        self.table.setItem(
-            row, COL_STATUS, cell(f"{icon} {status_text}", center=True, bold=True)
-        )
-        self.table.setItem(row, COL_ENTRY, cell(entry))
-        self.table.setItem(row, COL_EXIT, cell(exit_))
+        # ── ستون مسئول (Combo) ──
         self.table.setCellWidget(row, COL_RESP, self._make_resp_combo(step))
-        self.table.setItem(row, COL_SIGN, cell(step.signature or ""))
-        notes_it = cell(step.notes or "", center=False)
-        notes_it.setToolTip(step.notes or "")
-        self.table.setItem(row, COL_NOTES, notes_it)
+
+        # ── ستون یادداشت (راست‌چین، با truncate) ──
+        notes_text = (step.notes or "").strip()
+        display = notes_text
+        if len(display) > NOTES_PREVIEW_LENGTH:
+            display = display[:NOTES_PREVIEW_LENGTH] + "…"
+        notes_item = self._make_item(
+            display or "—",
+            align=Qt.AlignmentFlag.AlignRight,
+            bg=bg, fg=fg,
+        )
+        if notes_text:
+            notes_item.setToolTip(notes_text)
+        self.table.setItem(row, COL_NOTES, notes_item)
 
     def _make_resp_combo(self, step: WorkflowStep) -> QComboBox:
         cb = QComboBox()
         cb.setFont(get_font())
-        cb.setMinimumWidth(110)
+        cb.setMinimumWidth(100)
+        cb.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
         cb.setStyleSheet(
             """
             QComboBox {
-                border: none; background: transparent;
-                padding: 1px 4px;
+                border: 1px solid #cbd5e1;
+                border-radius: 6px;
+                background: #ffffff;
+                padding: 3px 8px;
+                min-height: 24px;
+                color: #0f172a;
             }
-            QComboBox:disabled { color: #475569; }
-            QComboBox::drop-down {
-                subcontrol-position: top left; width: 15px; border: none;
+            QComboBox:hover { border-color: #94a3b8; }
+            QComboBox:disabled {
+                background: #f1f5f9;
+                color: #94a3b8;
+                border-color: #e2e8f0;
             }
+            QComboBox::drop-down { border: none; width: 18px; }
             QComboBox QAbstractItemView {
-                border: 1px solid #94a3b8; background: #fff;
-                selection-background-color: #3b82f6; selection-color: #fff;
+                border: 1px solid #94a3b8;
+                background: #ffffff;
+                color: #0f172a;
+                selection-background-color: #3b82f6;
+                selection-color: #ffffff;
+                outline: none;
             }
         """
         )
@@ -1045,25 +1167,23 @@ class WorkflowDialog(QDialog):
         cb.setCurrentIndex(idx if idx >= 0 else 0)
         cb.setProperty("step_id", step.id)
         cb.setEnabled(
-            step.status != "completed"
-            and self._has_perm(PERM_REPORT_WRITE)
+            step.status != "completed" and self._has_perm(PERM_REPORT_WRITE)
         )
-        # Debounce: به جای ذخیره فوری، در تایمر ذخیره می‌شود
+        if step.signature:
+            cb.setToolTip(f"✒️ امضا شده توسط: {step.signature}")
         cb.currentIndexChanged.connect(self._on_resp_changed)
         return cb
 
+    # ════════════════════════════════════════════
+    #  Debounce تغییر مسئول
+    # ════════════════════════════════════════════
+
     def _on_resp_changed(self) -> None:
-        """
-        ثبت درخواست تغییر مسئول با debounce.
-        اگر کاربر سریعاً چند مسئول را امتحان کند، فقط آخرین مقدار ذخیره می‌شود.
-        """
         cb = self.sender()
         if not isinstance(cb, QComboBox) or cb.signalsBlocked():
             return
         if not self._has_perm(PERM_REPORT_WRITE):
-            self.toast.show_message(
-                "⛔ دسترسی ویرایش ندارید", color=COLOR_DANGER
-            )
+            self.toast.show_message("⛔ دسترسی ویرایش ندارید", color=COLOR_DANGER)
             cb.blockSignals(True)
             self._load_steps()
             cb.blockSignals(False)
@@ -1076,20 +1196,16 @@ class WorkflowDialog(QDialog):
         self._resp_save_timer.start()
 
     def _flush_resp_change(self) -> None:
-        """ذخیره فوری تغییر مسئول در انتظار (برای closeEvent یا reject)."""
         if not self._pending_resp:
             return
         step_id, val, cb = self._pending_resp
         self._pending_resp = None
         try:
-            self.db.update_workflow_step(
-                step_id=step_id, responsible_person=val
-            )
+            self.db.update_workflow_step(step_id=step_id, responsible_person=val)
             for s in self.steps:
                 if s.id == step_id:
                     s.responsible_person = val
                     break
-            # بروزرسانی local (بدون reload کامل)
             self._update_status()
             if hasattr(self, "toast"):
                 self.toast.show_message(
@@ -1099,7 +1215,6 @@ class WorkflowDialog(QDialog):
             logger.exception("resp update failed")
             if hasattr(self, "toast"):
                 self.toast.show_message(f"خطا: {exc}", color=COLOR_DANGER)
-            # بازگردانی UI به DB
             try:
                 if cb is not None:
                     cb.blockSignals(True)
@@ -1108,7 +1223,9 @@ class WorkflowDialog(QDialog):
                 if cb is not None:
                     cb.blockSignals(False)
 
-    # ── کمکی ──
+    # ════════════════════════════════════════════
+    #  کمکی‌ها
+    # ════════════════════════════════════════════
 
     def _get_selected_step(self) -> Optional[WorkflowStep]:
         rows = self.table.selectionModel().selectedRows()
@@ -1143,7 +1260,23 @@ class WorkflowDialog(QDialog):
     def _max_step_order(self) -> int:
         return max((s.step_order for s in self.steps), default=0)
 
-    # ── وضعیت و پروگرس ──
+    # ════════════════════════════════════════════
+    #  نوار وضعیت
+    # ════════════════════════════════════════════
+
+    def _set_status_style(self, color: str) -> None:
+        self.lbl_status.setStyleSheet(
+            f"QLabel#status_label {{"
+            f"background: #ffffff;"
+            f"border: 1px solid #cbd5e1;"
+            f"border-right: 4px solid {color};"
+            f"border-radius: 8px;"
+            f"padding: 8px 14px;"
+            f"color: {color};"
+            f"font-weight: bold;"
+            f"font-size: 12px;"
+            f"}}"
+        )
 
     def _update_status(self) -> None:
         completed = sum(1 for s in self.steps if s.status == "completed")
@@ -1161,40 +1294,25 @@ class WorkflowDialog(QDialog):
         )
         selected = self._get_selected_step()
 
-        # متن نوار وضعیت
+        # متن و رنگ نوار وضعیت
         if self.steps and all(s.status == "completed" for s in self.steps):
             self.lbl_status.setText("✅ تمامی مراحل تکمیل شده است")
-            self.lbl_status.setStyleSheet(
-                "QLabel{background:#fff;border:1px solid #cbd5e1;"
-                "border-radius:8px;padding:8px 14px;color:#15803d;"
-                "font-weight:bold;}"
-            )
+            self._set_status_style("#15803d")
         elif self._find_step("rejected"):
             self.lbl_status.setText("❌ جریان کار متوقف — گام رد شده وجود دارد")
-            self.lbl_status.setStyleSheet(
-                "QLabel{background:#fff;border:1px solid #cbd5e1;"
-                "border-radius:8px;padding:8px 14px;color:#b91c1c;"
-                "font-weight:bold;}"
-            )
+            self._set_status_style("#b91c1c")
         elif active:
             ic = _status_icon(active.status)
             la = _status_label(active.status)
             self.lbl_status.setText(
                 f"{ic} مرحله جاری: {self._step_label(active)} — وضعیت: {la}"
             )
-            clr = "#1d4ed8" if active.status == "in_progress" else "#b45309"
-            self.lbl_status.setStyleSheet(
-                f"QLabel{{background:#fff;border:1px solid #cbd5e1;"
-                f"border-radius:8px;padding:8px 14px;color:{clr};"
-                f"font-weight:bold;}}"
+            self._set_status_style(
+                "#1d4ed8" if active.status == "in_progress" else "#b45309"
             )
         else:
             self.lbl_status.setText("⏳ در انتظار آغاز …")
-            self.lbl_status.setStyleSheet(
-                "QLabel{background:#fff;border:1px solid #cbd5e1;"
-                "border-radius:8px;padding:8px 14px;color:#475569;"
-                "font-weight:bold;}"
-            )
+            self._set_status_style("#475569")
 
         # فعال/غیرفعال دکمه‌ها
         hw = self._has_perm(PERM_REPORT_WRITE)
@@ -1202,38 +1320,32 @@ class WorkflowDialog(QDialog):
         ip = self._find_step("in_progress")
 
         self.btn_entry.setEnabled(
-            hw
-            and selected is not None
-            and selected.status == "pending"
-            and ip is None
+            hw and selected is not None
+            and selected.status == "pending" and ip is None
         )
         self.btn_exit.setEnabled(
             hw and selected is not None and selected.status == "in_progress"
         )
         self.btn_notes.setEnabled(hw and selected is not None)
         self.btn_reopen.setEnabled(
-            hw
-            and selected is not None
-            and selected.status == "rejected"
-            and ip is None
+            hw and selected is not None
+            and selected.status == "rejected" and ip is None
         )
         self.btn_reject.setEnabled(
             hw and selected is not None and selected.status == "in_progress"
         )
         self.btn_prev.setEnabled(
-            hw
-            and selected is not None
+            hw and selected is not None
             and selected.status in ("in_progress", "completed")
         )
         self.btn_print.setEnabled(hr)
         self.btn_perf.setEnabled(hr)
 
-    # ══════════════════════════════════════
-    #  عملیات — بدون تأیید اضافی + Undo
-    # ══════════════════════════════════════
+    # ════════════════════════════════════════════
+    #  Snapshot / Undo
+    # ════════════════════════════════════════════
 
     def _snapshot_step(self, step: WorkflowStep) -> Dict[str, Any]:
-        """عکس فوری از گام و وضعیت ابلاغ پرونده برای Undo."""
         meeting_state: Optional[Dict[str, Any]] = None
         try:
             with self.db.session() as sess:
@@ -1259,14 +1371,6 @@ class WorkflowDialog(QDialog):
         }
 
     def _apply_snapshot(self, snap: Dict[str, Any]) -> None:
-        """
-        بازگرداندن گام و وضعیت پرونده به عکس فوری ذخیره‌شده.
-
-        نکته مهم (رفع باگ): وضعیت گام‌های دیگر پرونده در زمان Undo
-        از DB تازه خوانده می‌شود تا با اثرات «قانون طلایی»
-        (که main_window پس از ابلاغ، همه گام‌ها را completed می‌کند)
-        سازگار بماند. سپس `_load_steps` همه چیز را از DB می‌خواند.
-        """
         try:
             with self.db.session() as sess:
                 db_step = sess.get(WorkflowStep, snap["id"])
@@ -1284,15 +1388,11 @@ class WorkflowDialog(QDialog):
                     for field, value in meeting_state.items():
                         setattr(meeting, field, value)
 
-                    # ⚠️ رفع باگ: اگر Undo باعث شد پرونده دیگر «ابلاغ شده» نباشد،
-                    # گام‌هایی که توسط Golden Rule در main_window بسته شده بودند
-                    # باید به وضعیت «pending» یا «in_progress» برگردند.
                     if not meeting_state.get("sent_to_contractor_date"):
                         self._reopen_steps_closed_by_golden_rule(sess, meeting)
 
                 sess.commit()
 
-            # همگام‌سازی شیء در حافظه
             meeting_state = snap.get("meeting_state")
             if meeting_state:
                 for field, value in meeting_state.items():
@@ -1309,17 +1409,6 @@ class WorkflowDialog(QDialog):
             )
 
     def _reopen_steps_closed_by_golden_rule(self, sess, meeting: Meeting) -> None:
-        """
-        اگر Undo باعث شد پرونده از حالت «ابلاغ‌شده» خارج شود، گام‌هایی که
-        در main_window._apply_live_status به‌صورت خودکار completed شده‌اند
-        (یعنی تاریخ exit_date آن‌ها با sent_to_contractor_date قبلی برابر است)
-        به وضعیت منطقی برمی‌گردند.
-        """
-        prev_contractor_date = None
-        prev_state = self._last_applied_contractor_date
-        if prev_state is not None:
-            prev_contractor_date = prev_state
-
         steps = (
             sess.query(WorkflowStep)
             .filter(WorkflowStep.meeting_id == meeting.id)
@@ -1329,8 +1418,6 @@ class WorkflowDialog(QDialog):
         if not steps:
             return
 
-        # آخرین گامی که در حالت عادی کاربر تکمیل کرده (signature دارد)
-        # به‌عنوان مرز بین «تکمیل واقعی» و «تکمیل خودکار» در نظر گرفته می‌شود.
         last_user_completed_order = 0
         for s in steps:
             if s.status == "completed" and s.signature:
@@ -1341,13 +1428,14 @@ class WorkflowDialog(QDialog):
         for s in steps:
             if s.status != "completed":
                 continue
-            # گام‌هایی که امضای کاربر ندارند → توسط Golden Rule بسته شده‌اند
             if not s.signature and s.step_order > last_user_completed_order:
                 s.status = "pending"
                 s.entry_date = None
                 s.exit_date = None
 
-    # ── شروع اقدام ──
+    # ════════════════════════════════════════════
+    #  عملیات گردش کار
+    # ════════════════════════════════════════════
 
     def entry_step(self) -> None:
         if not self._need_write():
@@ -1373,8 +1461,7 @@ class WorkflowDialog(QDialog):
             )
             self.toast.show_message(
                 f"ابتدا مرحله قبلی را تکمیل کنید: {self._step_label(previous)}",
-                color=COLOR_WARNING,
-                duration_ms=5000,
+                color=COLOR_WARNING, duration_ms=5000,
             )
             return
 
@@ -1400,8 +1487,6 @@ class WorkflowDialog(QDialog):
             logger.exception("entry failed")
             self.toast.show_message(f"خطا: {exc}", color=COLOR_DANGER)
 
-    # ── تکمیل و امضا ──
-
     def exit_step(self) -> None:
         if not self._need_write():
             return
@@ -1426,7 +1511,6 @@ class WorkflowDialog(QDialog):
                 db_step.signature = self.current_user
                 db_step.status = "completed"
 
-                # تکمیل آخرین مرحله → ابلاغ رسمی و بستن پرونده
                 if is_final:
                     db_meeting = sess.get(Meeting, self.meeting.id)
                     if db_meeting:
@@ -1444,18 +1528,14 @@ class WorkflowDialog(QDialog):
 
             self._load_steps()
             self.toast.show_message(
-                message,
-                color=COLOR_SUCCESS,
+                message, color=COLOR_SUCCESS,
                 undo_callback=lambda: self._apply_snapshot(snap),
             )
         except Exception as exc:
             logger.exception("exit failed")
             self.toast.show_message(f"خطا: {exc}", color=COLOR_DANGER)
 
-    # ── عودت برای اصلاح ──
-
     def reject_step(self) -> None:
-        """ثبت عودت مرحله جاری همراه با علت روشن برای پیگیری بعدی."""
         if not self._need_write():
             return
         step = self._require_selected()
@@ -1469,10 +1549,8 @@ class WorkflowDialog(QDialog):
             return
 
         reason, ok = QInputDialog.getMultiLineText(
-            self,
-            "عودت مرحله برای اصلاح",
-            f"علت عودت «{self._step_label(step)}» را دقیق بنویسید:",
-            "",
+            self, "عودت مرحله برای اصلاح",
+            f"علت عودت «{self._step_label(step)}» را دقیق بنویسید:", "",
         )
         reason = (reason or "").strip()
         if not ok:
@@ -1507,8 +1585,6 @@ class WorkflowDialog(QDialog):
             self.toast.show_message(
                 f"خطا در ثبت عودت: {exc}", color=COLOR_DANGER
             )
-
-    # ── بازگشایی ردیف رد شده ──
 
     def reopen_step(self) -> None:
         if not self._need_write():
@@ -1548,9 +1624,6 @@ class WorkflowDialog(QDialog):
             logger.exception("reopen failed")
             self.toast.show_message(f"خطا: {exc}", color=COLOR_DANGER)
 
-    # ── بازگردانی به مرحله قبل ──
-    # ⚠️ تنها عملیاتی که هنوز تأیید می‌گیرد — چون مراحل بعدی ریست می‌شوند
-
     def go_to_previous_step(self) -> None:
         if not self._need_write():
             return
@@ -1571,8 +1644,7 @@ class WorkflowDialog(QDialog):
             return
 
         reply = QMessageBox.question(
-            self,
-            "بازگردانی گام",
+            self, "بازگردانی گام",
             f"«{self._step_label(step)}» و تمام گام‌های بعدی ریست می‌شوند.\nادامه می‌دهید؟",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
@@ -1635,8 +1707,6 @@ class WorkflowDialog(QDialog):
             self.meeting.contractor_response_date = None
             self.meeting.status = STATUS_PENDING
 
-    # ── ویرایش یادداشت ──
-
     def edit_notes(self) -> None:
         if not self._need_write():
             return
@@ -1644,8 +1714,7 @@ class WorkflowDialog(QDialog):
         if not step:
             return
         notes, ok = QInputDialog.getMultiLineText(
-            self,
-            "ویرایش یادداشت",
+            self, "ویرایش یادداشت",
             f"یادداشت «{self._step_label(step)}»:",
             step.notes or "",
         )
@@ -1659,8 +1728,6 @@ class WorkflowDialog(QDialog):
             self.toast.show_message("📝 یادداشت ذخیره شد", color=COLOR_NOTE)
         except Exception as exc:
             self.toast.show_message(f"خطا: {exc}", color=COLOR_DANGER)
-
-    # ── گزارش عملکرد ──
 
     def show_performance_report(self) -> None:
         if not self._has_perm(PERM_REPORT_READ):
@@ -1677,8 +1744,6 @@ class WorkflowDialog(QDialog):
         except Exception as exc:
             logger.exception("perf report failed")
             self.toast.show_message(f"خطا: {exc}", color=COLOR_DANGER)
-
-    # ── چاپ ──
 
     def save_and_print_report(self) -> None:
         if not self._has_perm(PERM_REPORT_READ):
@@ -1697,7 +1762,9 @@ class WorkflowDialog(QDialog):
             logger.exception("print failed")
             self.toast.show_message(f"خطا: {exc}", color=COLOR_DANGER)
 
-    # ── منوی راست‌کلیک ──
+    # ════════════════════════════════════════════
+    #  منوی راست‌کلیک
+    # ════════════════════════════════════════════
 
     def _show_context_menu(self, pos: QPoint) -> None:
         item = self.table.itemAt(pos)
@@ -1731,9 +1798,7 @@ class WorkflowDialog(QDialog):
         a_rev.setEnabled(step.status in ("in_progress", "completed") and hw)
 
         a_reopen = menu.addAction("🔄 ادامه پس از اصلاح")
-        a_reopen.setEnabled(
-            step.status == "rejected" and hw and ip is None
-        )
+        a_reopen.setEnabled(step.status == "rejected" and hw and ip is None)
 
         a_reject = menu.addAction("↩️ عودت برای اصلاح")
         a_reject.setEnabled(step.status == "in_progress" and hw)
@@ -1764,8 +1829,6 @@ class WorkflowDialog(QDialog):
         if fn:
             fn()
 
-    # ── دابل‌کلیک هوشمند ──
-
     def _on_double_click(self, index) -> None:
         row = index.row()
         if not (0 <= row < len(self.steps)):
@@ -1786,8 +1849,5 @@ class WorkflowDialog(QDialog):
 
         self._show_step_detail(step)
 
-    # ── جزئیات گام ──
-
     def _show_step_detail(self, step: WorkflowStep) -> None:
-        """نمایش جزئیات با Dialog سفارشی (متن طولانی یادداشت به‌درستی نمایش داده می‌شود)."""
         StepDetailDialog(step, parent=self).exec()
