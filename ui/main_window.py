@@ -414,7 +414,8 @@ class MeetingsPageModel(QAbstractTableModel):
         }
         colors = workflow_colors.get(workflow_state or "")
         if colors:
-            return QBrush(colors[0] if is_bg else self._DEFAULT_FG)
+            # هر دو رنگ تعریف‌شده واقعاً مصرف شوند: پس‌زمینه و متن متناسب با وضعیت.
+            return QBrush(colors[0] if is_bg else colors[1])
 
         if self._col_status >= 0:
             v = self._cell(row, self._col_status)
