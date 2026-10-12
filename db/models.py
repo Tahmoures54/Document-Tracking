@@ -106,6 +106,10 @@ class Meeting(Base):
     due_date = Column(Date, nullable=False, index=True)
     contract_date = Column(Date)
     
+    # مسیر واقعی: پیمانکار → نظارت → کارفرما
+    sent_to_supervision_date = Column(Date, index=True)   # ارسال پیمانکار به نظارت
+    supervision_entry_date = Column(Date, index=True)     # ورود به دفتر نظارت (دستی)
+
     # 🎯 تاریخ کلیدی: ابلاغ به پیمانکار = بسته شدن پرونده = تاریخ پاسخ پیمانکار = اتمام کار
     sent_to_contractor_date = Column(Date, index=True)
     closing_date = Column(Date)
@@ -186,6 +190,7 @@ class Meeting(Base):
         Index("idx_meeting_employer_contractor", "employer", "contractor"),
         Index("idx_meeting_discipline_priority", "discipline", "priority"),
         Index("idx_meeting_location", "location"),
+        Index("idx_meeting_supervision_dates", "sent_to_supervision_date", "supervision_entry_date"),
         Index("idx_meeting_dispatch_status", "sent_to_contractor_date", "status"),
     )
 
@@ -193,7 +198,9 @@ class Meeting(Base):
     # حذف ستون‌های «لینک فایل»، «تاریخ پاسخ پیمانکار» و «تاریخ بسته شدن» از گرید اصلی به سلیقه مهندسی جدید
     HEADER_TO_ATTR: Dict[str, str] = {
         "ردیف":                     "id",
-        "تاریخ ورود":               "entry_date",
+        "ارسال به نظارت":           "sent_to_supervision_date",
+        "ورود به نظارت":            "supervision_entry_date",
+        "ورود به کارفرما":          "entry_date",
         "تاریخ صورتجلسه":           "meeting_date",
         "شماره صورتجلسه":           "meeting_number",
         "تعداد پیوست":              "attachment_count",
@@ -237,6 +244,8 @@ class Meeting(Base):
         """تبدیل جامع مدل به دیکشنری JSON-Safe."""
         return {
             "id":                          self.id,
+            "sent_to_supervision_date":    self.sent_to_supervision_date.isoformat() if self.sent_to_supervision_date else None,
+            "supervision_entry_date":      self.supervision_entry_date.isoformat() if self.supervision_entry_date else None,
             "entry_date":                  self.entry_date.isoformat() if self.entry_date else None,
             "meeting_date":                self.meeting_date.isoformat() if self.meeting_date else None,
             "meeting_number":              self.meeting_number,
