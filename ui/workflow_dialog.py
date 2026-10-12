@@ -607,11 +607,18 @@ class WorkflowDialog(QDialog):
         self.table.setFont(get_font())
         return self.table
 
-    def _build_action_buttons(self) -> QHBoxLayout:
-        row = QHBoxLayout()
-        row.setSpacing(6)
+    def _build_action_buttons(self) -> QVBoxLayout:
+        """دو ردیف جدا برای عملیات اصلی و ابزارهای کمکی؛ بدون مخفی‌شدن دکمه‌ها."""
+        rows = QVBoxLayout()
+        rows.setSpacing(6)
+        primary = QHBoxLayout()
+        secondary = QHBoxLayout()
+        primary.setSpacing(6)
+        secondary.setSpacing(6)
 
-        def _btn(attr, text, tip, bg="#ffffff", fg="#0f172a"):
+        def _btn(
+            attr, text, tip, bg="#ffffff", fg="#0f172a", target=primary
+        ):
             b = QPushButton(text)
             b.setToolTip(tip)
             b.setFont(get_font(QFont.Weight.Bold, -1))
@@ -625,7 +632,7 @@ class WorkflowDialog(QDialog):
                 QPushButton {{
                     background: {bg}; color: {fg};
                     border: 1px solid #cbd5e1; border-radius: 6px;
-                    padding: 4px 14px;
+                    padding: 4px 12px;
                 }}
                 QPushButton:hover {{ background: #e2e8f0; }}
                 QPushButton:pressed {{ background: #cbd5e1; }}
@@ -633,52 +640,37 @@ class WorkflowDialog(QDialog):
                     background: #f1f5f9; color: #94a3b8;
                     border-color: #e2e8f0;
                 }}
-            """
+                """
             )
             setattr(self, attr, b)
-            row.addWidget(b)
+            target.addWidget(b)
 
+        # ردیف اول: کارهای اصلی گردش سند
+        _btn("btn_entry", "▶ شروع اقدام", "Ctrl+E", "#dbeafe", "#1e40af")
+        _btn("btn_exit", "✓ تکمیل مرحله", "Ctrl+X", "#d1fae5", "#065f46")
         _btn(
-            "btn_entry",
-            "📥 شروع اقدام",
-            "Ctrl+E",
-            "#dbeafe",
-            "#1e40af",
+            "btn_reject", "↩ عودت برای اصلاح",
+            "ثبت علت نقص و بازگرداندن مرحله جاری برای اصلاح",
+            "#ffedd5", "#9a3412",
         )
         _btn(
-            "btn_exit",
-            "📤 تکمیل و امضا",
-            "Ctrl+X",
-            "#d1fae5",
-            "#065f46",
-        )
-        _btn(
-            "btn_prev",
-            "↩️ بازگردانی",
-            "لغو گام و بازگشت به مرحله قبل",
-        )
-        _btn(
-            "btn_reopen",
-            "🔄 ادامه پس از اصلاح",
+            "btn_reopen", "🔄 ادامه پس از اصلاح",
             "بازگشایی مرحله عودت‌شده  Ctrl+B",
         )
-        _btn(
-            "btn_reject",
-            "↩️ عودت برای اصلاح",
-            "ثبت علت نقص و بازگرداندن مرحله جاری برای اصلاح",
-            "#ffedd5",
-            "#9a3412",
-        )
-        _btn("btn_notes", "📝 یادداشت", "Ctrl+N")
-        _btn("btn_perf", "📊 عملکرد", "گزارش آماری کارشناسان")
-        _btn("btn_print", "🖨️ چاپ", "Ctrl+P")
-        _btn("btn_refresh", "↺ بروزرسانی", "F5")
+        _btn("btn_prev", "↶ بازگردانی مرحله", "لغو گام و بازگشت به مرحله قبل")
+        primary.addStretch()
 
-        row.addStretch()
+        # ردیف دوم: ابزارهای کمکی و گزارش‌ها
+        _btn("btn_notes", "📝 یادداشت", "Ctrl+N", target=secondary)
+        _btn("btn_perf", "📊 عملکرد", "گزارش آماری کارشناسان", target=secondary)
+        _btn("btn_print", "🖨 چاپ گردش کار", "Ctrl+P", target=secondary)
+        _btn("btn_refresh", "↻ بروزرسانی", "F5", target=secondary)
+        secondary.addStretch()
+        _btn("btn_close", "بستن", "Escape", "#fee2e2", "#991b1b", secondary)
 
-        _btn("btn_close", "بستن", "Escape", "#fee2e2", "#991b1b")
-
-        return row
+        rows.addLayout(primary)
+        rows.addLayout(secondary)
+        return rows
 
     def _build_status_bar(self) -> QLabel:
         self.lbl_status = QLabel("⏳ در انتظار آغاز …")
