@@ -1,13 +1,18 @@
 # -*- coding: utf-8 -*-
 """
 ماژول گزارش نموداری وضعیت صورتجلسات
-ChartDialog - نمایش نمودار، جدول آماری و خروجی HTML/Excel/CSV
+ChartDialog — نمایش نمودار، جدول آماری و خروجی HTML/Excel/CSV
 
-نسخه بهبودیافته:
-- رفع بهم‌ریختگی حروف فارسی در نمودار: تمامی برچسب‌ها و متون نمودار به انگلیسی نمایش داده می‌شوند.
-- سایر بخش‌ها (کارت‌ها، جداول، خروجی‌ها) کاملاً فارسی باقی مانده‌اند.
+نسخه بهبودیافته ۲:
+- رفع بهم‌ریختگی حروف فارسی در نمودار: تمامی برچسب‌ها به انگلیسی (پایدار)
+- سایر بخش‌ها (کارت‌ها، جداول، خروجی‌ها) کاملاً فارسی
 - کش هوشمند برای بهینه‌سازی سرعت
 - Exception handling دقیق‌تر
+- حذف متن تکراری، پارامتری‌سازی عنوان، تاریخ شمسی در گزارش
+- تبدیل صحیح رنگ hex به RGB روشن برای Excel (بدون alpha نادیده‌گرفته‌شده)
+- یکسان‌سازی واحد درصد در همه خروجی‌ها
+- هماهنگ‌سازی رفتار چاپ و HTML (نمودار پیش‌فرض شامل)
+- جداسازی CSS به ثابت ماژول برای نگهداری بهتر
 """
 from __future__ import annotations
 
@@ -20,7 +25,6 @@ import re
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
-from urllib.parse import quote
 
 from PyQt6.QtCore import Qt, QMarginsF, QSizeF, QUrl
 from PyQt6.QtGui import QColor, QDesktopServices, QFont, QKeyEvent
@@ -31,6 +35,8 @@ from PyQt6.QtWidgets import (
     QSplitter, QTableWidget, QTableWidgetItem,
     QVBoxLayout, QWidget,
 )
+
+from utils.date_utils import today_shamsi, to_shamsi
 
 logger = logging.getLogger(__name__)
 
@@ -65,10 +71,10 @@ except ImportError:
 # ثابت‌های ماژول
 # ══════════════════════════════════════════════════
 
-REPORT_SUBJECT  = "گزارش وضعیت صورتجلسات"
-REPORT_TYPE     = "وضعیت و اولویت"
-APP_NAME_FA     = "Document & MOM Tracking System"
-APP_SEARCH_URL  = "https://www.google.com/search?q=" + quote("Document & MOM Tracking System")
+DEFAULT_REPORT_SUBJECT = "گزارش وضعیت صورتجلسات"
+DEFAULT_REPORT_TYPE    = "وضعیت و اولویت"
+DEFAULT_CHART_TITLE    = "Meetings Status Overview"
+APP_NAME_FA            = "Document & MOM Tracking System"
 
 # رنگ‌بندی وضعیت‌ها
 STATUS_COLORS: Dict[str, str] = {
@@ -79,11 +85,9 @@ STATUS_COLORS: Dict[str, str] = {
     "بازگشت داده شده":   "#fb923c",
 }
 
-# رنگ پیش‌فرض برای وضعیت‌های ناشناخته
 DEFAULT_STATUS_COLOR = "#94a3b8"
 
-# ⭐️ نگاشت وضعیت‌ها و اولویت‌های فارسی به انگلیسی جهت رفع مشکل نمایش
-# فقط در نمودار Matplotlib کاربرد دارد
+# نگاشت وضعیت/اولویت به انگلیسی — فقط برای نمودار matplotlib
 STATUS_EN: Dict[str, str] = {
     "در دست بررسی":     "In Review",
     "در انتظار تأیید":   "Awaiting Approval",
@@ -101,14 +105,17 @@ PRIORITY_EN: Dict[str, str] = {
     "نامشخص":   "Unknown",
 }
 
-# ترتیب نمایش کارت‌ها
+# ترتیب نمایش کارت‌ها (وضعیت‌های خارج از این لیست خودکار در انتها می‌آیند)
 CARD_ORDER = ["در دست بررسی", "در انتظار تأیید", "تکمیل شده", "لغو شده", "بازگشت داده شده"]
 
 # حداکثر ردیف در جدول اولویت‌های برتر
 TOP_N = 15
 
-# فونت پیش‌فرض
+# فونت پیش‌فرض گزارش
 DEFAULT_FONT_FAMILY = "Vazirmatn"
+
+# واحد درصد یکسان در همه خروجی‌ها (نسخه فارسی)
+PERCENT_SUFFIX = "٪"
 
 # جداکننده کلید ترکیبی status|priority
 _KEY_SEP_PATTERN = re.compile(r"\s*\|\s*")
@@ -194,6 +201,198 @@ class _ReportTheme:
 
 
 # ══════════════════════════════════════════════════
+# توابع کمکی ماژول
+# ══════════════════════════════════════════════════
+
+def _safe_int(value: Any, default: int = 0) -> int:
+    """تبدیل امن هر مقدار به int."""
+    try:
+        if value is None:
+            return default
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _lighten_hex(hex_color: str, factor: float = 0.85) -> str:
+    """
+    روشن‌سازی یک رنگ hex (بدون آلفا) برای استفاده در Excel.
+    `factor=0.85` یعنی نتیجه ۸۵٪ به سفید نزدیک‌تر است.
+    مثال: '#f59e0b' → 'FBE7B8'
+    """
+    h = hex_color.lstrip("#")
+    if len(h) != 6:
+        return DEFAULT_STATUS_COLOR.lstrip("#").upper()
+    try:
+        r = int(h[0:2], 16)
+        g = int(h[2:4], 16)
+        b = int(h[4:6], 16)
+    except ValueError:
+        return DEFAULT_STATUS_COLOR.lstrip("#").upper()
+    factor = max(0.0, min(1.0, factor))
+    r = int(r + (255 - r) * factor)
+    g = int(g + (255 - g) * factor)
+    b = int(b + (255 - b) * factor)
+    return f"{r:02X}{g:02X}{b:02X}"
+
+
+def _format_shamsi_timestamp() -> str:
+    """تولید مهر زمانی به شمسی برای استفاده در گزارش."""
+    try:
+        shamsi_date = today_shamsi() or ""
+    except Exception:
+        shamsi_date = ""
+    time_str = datetime.now().strftime("%H:%M:%S")
+    return f"{shamsi_date}  {time_str}".strip()
+
+
+def _sanitize_filename(s: str) -> str:
+    """پاک‌سازی رشته برای استفاده در نام فایل."""
+    s = (s or "").strip()
+    s = _INVALID_FILENAME_CHARS.sub("_", s)
+    s = _WHITESPACE_PATTERN.sub("_", s).strip("_")
+    return (s or "report")[:100]
+
+
+def _parse_key(key: str) -> Tuple[str, str]:
+    """تبدیل کلید ترکیبی 'وضعیت | اولویت' به تاپل."""
+    raw = (key or "").strip()
+    parts = _KEY_SEP_PATTERN.split(raw, maxsplit=1)
+    if len(parts) == 2:
+        return parts[0].strip(), parts[1].strip()
+    return raw, "نامشخص"
+
+
+def _esc(s: Any) -> str:
+    """HTML escape ایمن."""
+    return html.escape(str(s) if s is not None else "")
+
+
+# ══════════════════════════════════════════════════
+# CSS گزارش HTML — به‌صورت یک ثابت ماژول
+# ══════════════════════════════════════════════════
+
+_REPORT_CSS_TEMPLATE = """
+    @page {{ size:A4 landscape; margin:9mm 9mm 18mm 9mm; }}
+    :root {{ --text:#111827; --muted:#4b5563; --border:#d1d5db; }}
+
+    html {{ font-size:{font_size_px}; -webkit-text-size-adjust:100%; }}
+    body {{
+      margin:0; padding:0;
+      font-family:'{font_family}','Segoe UI',Tahoma,Arial,sans-serif;
+      color:var(--text);
+      {body_bg}
+    }}
+
+    .wrap {{ padding:{body_padding}; box-sizing:border-box; }}
+    .page {{ background:#fff; {page_shadow} overflow:hidden; }}
+
+    /* ── هدر ── */
+    .header {{ padding:{header_pad}; {header_bg} }}
+    .hdr-row {{
+      display:flex; align-items:center;
+      justify-content:space-between; gap:12px; flex-wrap:wrap;
+    }}
+    .hdr-left  {{ display:flex; align-items:center; gap:10px; min-width:240px; }}
+    .mark {{
+      width:36px; height:36px; border-radius:9px; flex-shrink:0;
+      background:linear-gradient(135deg,rgba(0,191,255,.95),rgba(16,185,129,.95));
+      display:flex; align-items:center; justify-content:center;
+      color:#fff; font-weight:900; font-size:12px;
+    }}
+    .hdr-pills {{ display:flex; gap:8px; flex-wrap:wrap; align-items:center; }}
+    .pill {{
+      display:inline-block; padding:5px 10px; border-radius:999px;
+      font-weight:850; font-size:12px;
+      border:{pill_border}; background:{pill_bg};
+      color:{pill_color}; white-space:nowrap;
+    }}
+    .hdr-brand {{
+      margin-top:8px; font-size:14px; font-weight:bold;
+      color:{brand_color};
+    }}
+    .hdr-title {{
+      margin-top:10px; font-size:22px; font-weight:900;
+      color:{pill_color};
+    }}
+    .hdr-meta {{ margin-top:6px; font-size:13px; color:{meta_color}; }}
+
+    /* ── کارت‌ها ── */
+    .body {{ padding:14px 16px 12px 16px; }}
+    .cards {{
+      display:grid;
+      grid-template-columns:repeat(auto-fit,minmax(140px,1fr));
+      gap:10px; margin-bottom:12px;
+    }}
+    .card {{
+      border:1px solid var(--border); border-radius:12px;
+      padding:12px; background:#fff;
+    }}
+    .card-title {{ font-size:14px; color:var(--muted); font-weight:650; }}
+    .card-value {{ margin-top:8px; font-size:32px; font-weight:900; font-variant-numeric:tabular-nums; }}
+    .card-sub   {{ margin-top:4px; font-size:14px; color:var(--muted); }}
+
+    /* ── گرید و پانل ── */
+    .grid {{ display:grid; gap:12px; align-items:start; margin-top:4px; }}
+    .panel {{ border:1px solid var(--border); border-radius:12px; background:#fff; overflow:hidden; }}
+    .panel-title {{
+      padding:10px 14px; background:#f8fafc; border-bottom:1px solid var(--border);
+      font-size:14px; color:var(--muted);
+      display:flex; justify-content:space-between; gap:8px; flex-wrap:wrap;
+    }}
+    .panel-title strong {{ color:#111827; font-weight:850; }}
+
+    /* ── نمودار ── */
+    .chart {{ padding:10px; text-align:center; }}
+    .chart img {{
+      max-width:90%; max-height:230px;
+      border-radius:10px; border:1px solid var(--border);
+    }}
+
+    /* ── جدول ── */
+    .tablewrap {{ overflow:auto; }}
+    table {{ width:100%; border-collapse:collapse; table-layout:fixed; font-size:14px; }}
+    thead th {{
+      position:sticky; top:0; z-index:2; background:#f3f4f6;
+      color:#111827; text-align:right;
+      padding:10px 12px; border-bottom:1px solid var(--border);
+      white-space:nowrap;
+    }}
+    tbody td {{
+      padding:10px 12px; border-bottom:1px solid var(--border);
+      vertical-align:top; word-break:break-word;
+    }}
+    td.num {{ text-align:center; white-space:nowrap; font-variant-numeric:tabular-nums; }}
+    .col-st  {{ width:24%; }}
+    .col-pr  {{ width:38%; }}
+    .col-cnt {{ width:19%; }}
+    .col-pct {{ width:19%; }}
+
+    /* ── فوتر ── */
+    .footer {{
+      padding:10px 16px 12px 16px; border-top:1px solid var(--border);
+      color:var(--muted); font-size:13px;
+      display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap;
+      background:#fff;
+    }}
+
+    /* ── چاپ ── */
+    @media print {{
+      body {{ background:#fff; }}
+      .wrap {{ padding:0; }}
+      .page {{ box-shadow:none; border:none; border-radius:0; }}
+      .tablewrap {{ max-height:none !important; overflow:visible; }}
+      .grid {{ grid-template-columns:1fr !important; }}
+      thead {{ display:table-header-group; }}
+      .footer {{
+        position:fixed; left:9mm; right:9mm; bottom:8mm;
+        border-top:1px solid #ddd; background:#fff;
+      }}
+    }}
+"""
+
+
+# ══════════════════════════════════════════════════
 # کلاس اصلی
 # ══════════════════════════════════════════════════
 
@@ -202,19 +401,30 @@ class ChartDialog(QDialog):
     دیالوگ گزارش نموداری وضعیت و اولویت صورتجلسات.
 
     قابلیت‌ها:
-    - نمودار میله‌ای وضعیت‌ها (matplotlib با برچسب انگلیسی برای پایداری فونت)
+    - نمودار میله‌ای وضعیت‌ها (matplotlib با برچسب انگلیسی)
     - جدول تفکیکی وضعیت × اولویت (فارسی)
     - خروجی HTML شکیل (قابل چاپ)
-    - خروجی اکسل (openpyxl) و CSV
-    - چاپ مستقیم
+    - خروجی Excel (openpyxl) و CSV
+    - چاپ مستقیم روی A4 افقی
+
+    پارامترها:
+        data_counts: دیکشنری {'وضعیت | اولویت': تعداد}
+        context_title: عنوان کانتکست گزارش (مثلاً فیلتر فعلی)
+        company: نام شرکت (اختیاری)
+        project: نام پروژه (اختیاری)
+        report_subject: عنوان موضوع گزارش (پیش‌فرض: 'گزارش وضعیت صورتجلسات')
+        chart_title: عنوان بالای نمودار matplotlib (پیش‌فرض انگلیسی)
+        parent: ویجت والد
     """
 
     def __init__(
         self,
         data_counts: Dict[str, int],
         context_title: str,
-        company:  str = "",
-        project:  str = "",
+        company: str = "",
+        project: str = "",
+        report_subject: str = DEFAULT_REPORT_SUBJECT,
+        chart_title: str = DEFAULT_CHART_TITLE,
         parent: Optional[QWidget] = None,
     ) -> None:
         super().__init__(parent)
@@ -225,22 +435,28 @@ class ChartDialog(QDialog):
                 "دستور نصب: pip install matplotlib"
             )
 
-        self.data_counts:   Dict[str, int] = dict(data_counts or {})
+        # پاک‌سازی و نرمال‌سازی ورودی
+        self.data_counts: Dict[str, int] = {
+            str(k): _safe_int(v, 0)
+            for k, v in (data_counts or {}).items()
+        }
         self.context_title: str = (context_title or "").strip()
-        self.company:       str = (company or "").strip()
-        self.project:       str = (project or "").strip()
+        self.company: str = (company or "").strip()
+        self.project: str = (project or "").strip()
+        self.report_subject: str = (report_subject or DEFAULT_REPORT_SUBJECT).strip()
+        self.chart_title: str = (chart_title or DEFAULT_CHART_TITLE).strip()
 
-        self.setWindowTitle(f"{REPORT_TYPE}  —  {self.context_title}")
+        self.setWindowTitle(f"{DEFAULT_REPORT_TYPE}  —  {self.context_title}")
         self.resize(1300, 760)
         self.setMinimumSize(1024, 600)
 
         # کش محاسبه‌شده
-        self._cached_rows:            Optional[List[_Row]]     = None
-        self._cached_status_totals:   Optional[Dict[str, int]] = None
+        self._cached_rows: Optional[List[_Row]] = None
+        self._cached_status_totals: Optional[Dict[str, int]] = None
         self._cached_priority_totals: Optional[Dict[str, int]] = None
-        self._cached_grand_total:     Optional[int]            = None
-        self._cached_top_n:           Optional[List[_TopItem]] = None
-        self._cached_top_n_size:      int                      = -1
+        self._cached_grand_total: Optional[int] = None
+        self._cached_top_n: Optional[List[_TopItem]] = None
+        self._cached_top_n_size: int = -1
 
         self._apply_style()
         self._build_ui()
@@ -252,55 +468,17 @@ class ChartDialog(QDialog):
     # ══════════════════════════════════════════════
 
     @staticmethod
-    def _sanitize_filename(s: str) -> str:
-        """پاک‌سازی رشته برای استفاده در نام فایل."""
-        s = (s or "").strip()
-        s = _INVALID_FILENAME_CHARS.sub("_", s)
-        s = _WHITESPACE_PATTERN.sub("_", s).strip("_")
-        return (s or "report")[:100]
-
-    @staticmethod
-    def _esc(s: Any) -> str:
-        """HTML escape ایمن."""
-        return html.escape(str(s) if s is not None else "")
-
-    @staticmethod
-    def _parse_key(key: str) -> Tuple[str, str]:
-        """
-        تبدیل کلید ترکیبی 'وضعیت | اولویت' به تاپل.
-        """
-        raw = (key or "").strip()
-        parts = _KEY_SEP_PATTERN.split(raw, maxsplit=1)
-        if len(parts) == 2:
-            return parts[0].strip(), parts[1].strip()
-        return raw, "نامشخص"
-
-    @staticmethod
-    def _hex_to_argb(hex_color: str, alpha: str = "22") -> str:
-        """
-        تبدیل رنگ hex به فرمت ARGB مورد نیاز openpyxl.
-        """
-        bg = hex_color.lstrip("#")
-        if len(bg) == 6:
-            return f"{alpha}{bg}"
-        return f"FF{DEFAULT_STATUS_COLOR.lstrip('#')}"
-
-    @staticmethod
     def _to_english_status(status_fa: str) -> str:
-        """تبدیل وضعیت فارسی به معادل انگلیسی برای نمودار."""
         return STATUS_EN.get(status_fa.strip(), status_fa.strip())
 
     @staticmethod
     def _to_english_priority(priority_fa: str) -> str:
-        """تبدیل اولویت فارسی به معادل انگلیسی برای نمودار."""
         return PRIORITY_EN.get(priority_fa.strip(), priority_fa.strip())
 
     def _grand_total(self) -> int:
         """مجموع کل رکوردها (کش‌شده)."""
         if self._cached_grand_total is None:
-            self._cached_grand_total = sum(
-                int(v or 0) for v in self.data_counts.values()
-            )
+            self._cached_grand_total = sum(self.data_counts.values())
         return self._cached_grand_total
 
     def _rows(self) -> List[_Row]:
@@ -311,18 +489,18 @@ class ChartDialog(QDialog):
         grand = self._grand_total() or 1
         items = sorted(
             self.data_counts.items(),
-            key=lambda x: int(x[1] or 0),
+            key=lambda x: x[1],
             reverse=True,
         )
         self._cached_rows = [
             _Row(
                 status=st,
                 priority=pr,
-                count=int(c or 0),
-                pct=(int(c or 0) / grand) * 100.0,
+                count=c,
+                pct=(c / grand) * 100.0,
             )
             for key, c in items
-            for st, pr in [self._parse_key(str(key))]
+            for st, pr in [_parse_key(str(key))]
         ]
         return self._cached_rows
 
@@ -333,8 +511,8 @@ class ChartDialog(QDialog):
 
         totals: Dict[str, int] = {}
         for key, c in self.data_counts.items():
-            st, _ = self._parse_key(str(key))
-            totals[st] = totals.get(st, 0) + int(c or 0)
+            st, _ = _parse_key(str(key))
+            totals[st] = totals.get(st, 0) + c
         self._cached_status_totals = totals
         return totals
 
@@ -345,10 +523,10 @@ class ChartDialog(QDialog):
 
         totals: Dict[str, int] = {}
         for key, c in self.data_counts.items():
-            _, pr = self._parse_key(str(key))
-            totals[pr] = totals.get(pr, 0) + int(c or 0)
+            _, pr = _parse_key(str(key))
+            totals[pr] = totals.get(pr, 0) + c
         self._cached_priority_totals = totals
-        return totals
+        return self._cached_priority_totals
 
     def _top_priority(self, n: int = TOP_N) -> List[_TopItem]:
         """n ردیف برتر بر اساس تعداد (کش‌شده)."""
@@ -357,11 +535,13 @@ class ChartDialog(QDialog):
 
         agg: Dict[Tuple[str, str], int] = {}
         for key, c in self.data_counts.items():
-            pair = self._parse_key(str(key))
-            agg[pair] = agg.get(pair, 0) + int(c or 0)
+            pair = _parse_key(str(key))
+            agg[pair] = agg.get(pair, 0) + c
 
         grand = sum(agg.values()) or 1
-        top_n_items = sorted(agg.items(), key=lambda kv: kv[1], reverse=True)[:max(0, n)]
+        top_n_items = sorted(
+            agg.items(), key=lambda kv: kv[1], reverse=True
+        )[:max(0, n)]
 
         result = [
             _TopItem(status=st, priority=pr, total=cnt, pct=(cnt / grand) * 100.0)
@@ -386,7 +566,10 @@ class ChartDialog(QDialog):
 
     def update_data(self, data_counts: Dict[str, int]) -> None:
         """به‌روزرسانی داده‌ها و رفرش UI."""
-        self.data_counts = dict(data_counts or {})
+        self.data_counts = {
+            str(k): _safe_int(v, 0)
+            for k, v in (data_counts or {}).items()
+        }
         self._invalidate_cache()
         self._plot_chart()
         self._fill_table()
@@ -398,10 +581,11 @@ class ChartDialog(QDialog):
     def _draw_on_figure(self, fig: "Figure") -> None:
         """
         ترسیم نمودار میله‌ای روی Figure داده‌شده.
-        
-        نکته: به‌دلیل عدم پشتیبانی پایدار matplotlib از حروف فارسی،
-        تمامی برچسب‌ها و متون این نمودار به انگلیسی نمایش داده می‌شوند.
+        تمامی برچسب‌ها به انگلیسی نگاشت می‌شوند (پایداری فونت matplotlib).
         """
+        # تمیزکاری محافظتی — اجازه می‌دهد این متد چند بار روی یک fig صدا زده شود
+        fig.clear()
+
         status_totals = self._status_totals()
         if status_totals:
             labels_fa = list(status_totals.keys())
@@ -413,11 +597,10 @@ class ChartDialog(QDialog):
             values = [0]
 
         grand = sum(values) or 1
-        # از رنگ‌های اصلی مبتنی بر نسخه فارسی وضعیت استفاده می‌شود
         colors = [STATUS_COLORS.get(lbl, DEFAULT_STATUS_COLOR) for lbl in labels_fa]
 
         ax = fig.add_subplot(111)
-        bars = ax.bar(
+        ax.bar(
             labels_en, values,
             color=colors,
             edgecolor="white",
@@ -445,13 +628,8 @@ class ChartDialog(QDialog):
                 fontweight="bold",
             )
 
-        # عنوان بالای نمودار (برند)
-        brand = self._brand_line()
-        # چون ممکن است برند شامل حروف فارسی باشد، در نمودار نمایش داده نمی‌شود
-        # اما بقیه اطلاعات به انگلیسی رندر می‌شوند
-
         ax.set_title(
-            "Meetings Status Overview",
+            self.chart_title,
             fontsize=13,
             fontweight="bold",
             pad=12,
@@ -596,7 +774,6 @@ class ChartDialog(QDialog):
         self.btn_export_csv.setToolTip("خروجی جدول به فرمت CSV")
         self.btn_print.setToolTip("چاپ گزارش (A4 افقی)")
 
-        # غیرفعال‌سازی دکمه اکسل در صورت نبود openpyxl
         if not HAS_OPENPYXL:
             self.btn_export_excel.setEnabled(False)
             self.btn_export_excel.setToolTip(
@@ -613,7 +790,6 @@ class ChartDialog(QDialog):
 
         bar.addStretch()
 
-        # اتصال سیگنال‌ها
         self.btn_save_html.clicked.connect(self.save_report_html)
         self.btn_export_excel.clicked.connect(self.export_excel)
         self.btn_export_csv.clicked.connect(self.export_data_csv)
@@ -680,8 +856,7 @@ class ChartDialog(QDialog):
             self.table_widget.setSpan(0, 0, 1, 4)
             return
 
-        # ردیف‌های داده
-        self.table_widget.setRowCount(len(rows) + 1)  # +1 برای مجموع
+        self.table_widget.setRowCount(len(rows) + 1)
 
         for r, row in enumerate(rows):
             self._set_table_row(r, row.status, row.priority, row.count, row.pct)
@@ -691,18 +866,16 @@ class ChartDialog(QDialog):
         sum_row = len(rows)
 
         items = {
-            0: self._make_item("مجموع",         bold=True),
-            1: self._make_item("",              bold=False),
+            0: self._make_item("مجموع", bold=True),
+            1: self._make_item("", bold=False),
             2: self._make_item(str(total_count), bold=True, align=Qt.AlignmentFlag.AlignCenter),
-            3: self._make_item("۱۰۰٪",         bold=True, align=Qt.AlignmentFlag.AlignCenter),
+            3: self._make_item(f"۱۰۰{PERCENT_SUFFIX}", bold=True, align=Qt.AlignmentFlag.AlignCenter),
         }
         for col, item in items.items():
             self.table_widget.setItem(sum_row, col, item)
 
-        # ادغام دو ستون اول ردیف مجموع
         self.table_widget.setSpan(sum_row, 0, 1, 2)
 
-        # رنگ پس‌زمینه ردیف مجموع
         for col in range(4):
             item = self.table_widget.item(sum_row, col)
             if item:
@@ -725,10 +898,9 @@ class ChartDialog(QDialog):
         )
         self.table_widget.setItem(
             row, 3,
-            self._make_item(f"{pct:.1f}٪", align=Qt.AlignmentFlag.AlignCenter)
+            self._make_item(f"{pct:.1f}{PERCENT_SUFFIX}", align=Qt.AlignmentFlag.AlignCenter)
         )
 
-        # رنگ‌بندی بر اساس وضعیت
         color_hex = STATUS_COLORS.get(status)
         if color_hex:
             bg = QColor(color_hex)
@@ -771,26 +943,26 @@ class ChartDialog(QDialog):
     ) -> str:
         """تولید HTML گزارش کامل."""
         theme = _ReportTheme.print_mode() if print_mode else _ReportTheme.screen()
-        ts_str = datetime.now().strftime("%Y-%m-%d  %H:%M:%S")
+        ts_str = _format_shamsi_timestamp()
 
         return "\n".join([
             "<!doctype html>",
             '<html dir="rtl">',
-            self._html_head(theme, ts_str),
+            self._html_head(theme),
             "<body>",
             self._html_body(theme, ts_str, include_chart),
             "</body>",
             "</html>",
         ])
 
-    def _html_head(self, theme: _ReportTheme, ts: str) -> str:
+    def _html_head(self, theme: _ReportTheme) -> str:
         """تولید بخش <head> HTML."""
-        title = self._esc(self.context_title)
+        title = _esc(self.context_title)
         css = self._build_css(theme)
         return f"""<head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>{self._esc(REPORT_TYPE)} — {title}</title>
+  <title>{_esc(DEFAULT_REPORT_TYPE)} — {title}</title>
   <style>{css}</style>
 </head>"""
 
@@ -801,11 +973,11 @@ class ChartDialog(QDialog):
         include_chart: bool,
     ) -> str:
         """تولید بخش <body> HTML."""
-        brand     = self._esc(self._brand_line())
-        title     = self._esc(self.context_title)
-        subject   = self._esc(REPORT_SUBJECT)
-        rtype     = self._esc(REPORT_TYPE)
-        app_name  = self._esc(APP_NAME_FA)
+        brand     = _esc(self._brand_line())
+        title     = _esc(self.context_title)
+        subject   = _esc(self.report_subject)
+        rtype     = _esc(DEFAULT_REPORT_TYPE)
+        app_name  = _esc(APP_NAME_FA)
 
         brand_block = f'<div class="hdr-brand">{brand}</div>' if brand else ""
 
@@ -835,14 +1007,12 @@ class ChartDialog(QDialog):
 
         grid_cols = "1fr 1fr" if (include_chart and chart_panel) else "1fr"
 
-        # تعداد واقعی Top
         actual_top = len(top_items)
         top_label = f"{actual_top} مورد" if actual_top > 0 else "بدون داده"
 
+        # فوتر فقط نام برنامه — بدون تکرار timestamp
         footer_html = (
-            f'<span><a href="{APP_SEARCH_URL}" style="color:inherit;">'
-            f"<strong>{app_name}</strong></a> — سامانه Document & MOM Tracking System</span>"
-            f"<span>تولید شده: {ts}</span>"
+            f'<span><strong>{app_name}</strong> — سامانه Document & MOM Tracking System</span>'
         )
 
         return f"""<div class="wrap">
@@ -924,14 +1094,14 @@ class ChartDialog(QDialog):
         extras = sorted(set(status_totals.keys()) - set(CARD_ORDER))
 
         for k in ordered + extras:
-            v = int(status_totals.get(k, 0))
+            v = status_totals.get(k, 0)
             pct = (v / grand) * 100.0
             color = STATUS_COLORS.get(k, "#64748b")
             cards.append(f"""
 <div class="card" style="border-top:3px solid {color};">
-  <div class="card-title">{self._esc(k)}</div>
+  <div class="card-title">{_esc(k)}</div>
   <div class="card-value" style="color:{color};">{v:,}</div>
-  <div class="card-sub">{pct:.1f}٪</div>
+  <div class="card-sub">{pct:.1f}{PERCENT_SUFFIX}</div>
 </div>""")
 
         return "\n".join(cards)
@@ -945,10 +1115,10 @@ class ChartDialog(QDialog):
         for i, t in enumerate(items, start=1):
             rows.append(f"""<tr>
   <td class="num">{i}</td>
-  <td>{self._esc(t.status)}</td>
-  <td>{self._esc(t.priority)}</td>
+  <td>{_esc(t.status)}</td>
+  <td>{_esc(t.priority)}</td>
   <td class="num">{t.total:,}</td>
-  <td class="num">{t.pct:.1f}٪</td>
+  <td class="num">{t.pct:.1f}{PERCENT_SUFFIX}</td>
 </tr>""")
         return "\n".join(rows)
 
@@ -962,10 +1132,10 @@ class ChartDialog(QDialog):
         for r in rows:
             html_rows.append(
                 f"<tr>"
-                f"<td class='col-st'>{self._esc(r.status)}</td>"
-                f"<td class='col-pr'>{self._esc(r.priority)}</td>"
+                f"<td class='col-st'>{_esc(r.status)}</td>"
+                f"<td class='col-pr'>{_esc(r.priority)}</td>"
                 f"<td class='num col-cnt'>{r.count:,}</td>"
-                f"<td class='num col-pct'>{r.pct:.1f}٪</td>"
+                f"<td class='num col-pct'>{r.pct:.1f}{PERCENT_SUFFIX}</td>"
                 f"</tr>"
             )
 
@@ -975,132 +1145,27 @@ class ChartDialog(QDialog):
             "<td class='col-st'>مجموع</td>"
             "<td class='col-pr'></td>"
             f"<td class='num col-cnt'>{total:,}</td>"
-            "<td class='num col-pct'>۱۰۰٪</td>"
+            f"<td class='num col-pct'>۱۰۰{PERCENT_SUFFIX}</td>"
             "</tr>"
         )
         return "\n".join(html_rows)
 
     def _build_css(self, theme: _ReportTheme) -> str:
         """تولید CSS گزارش بر اساس theme."""
-        return f"""
-    @page {{ size:A4 landscape; margin:9mm 9mm 18mm 9mm; }}
-    :root {{ --text:#111827; --muted:#4b5563; --border:#d1d5db; }}
-
-    html {{ font-size:{theme.font_size_px}; -webkit-text-size-adjust:100%; }}
-    body {{
-      margin:0; padding:0;
-      font-family:'{DEFAULT_FONT_FAMILY}','Segoe UI',Tahoma,Arial,sans-serif;
-      color:var(--text);
-      {theme.body_bg}
-    }}
-
-    .wrap {{ padding:{theme.body_padding}; box-sizing:border-box; }}
-    .page {{ background:#fff; {theme.page_shadow} overflow:hidden; }}
-
-    /* ── هدر ── */
-    .header {{ padding:{theme.header_pad}; {theme.header_bg} }}
-    .hdr-row {{
-      display:flex; align-items:center;
-      justify-content:space-between; gap:12px; flex-wrap:wrap;
-    }}
-    .hdr-left  {{ display:flex; align-items:center; gap:10px; min-width:240px; }}
-    .mark {{
-      width:32px; height:32px; border-radius:8px; flex-shrink:0;
-      background:linear-gradient(135deg,rgba(0,191,255,.95),rgba(16,185,129,.95));
-      display:flex; align-items:center; justify-content:center;
-      color:#fff; font-weight:900; font-size:10px;
-    }}
-    .hdr-pills {{ display:flex; gap:8px; flex-wrap:wrap; align-items:center; }}
-    .pill {{
-      display:inline-block; padding:5px 10px; border-radius:999px;
-      font-weight:850; font-size:12px;
-      border:{theme.pill_border}; background:{theme.pill_bg};
-      color:{theme.pill_color}; white-space:nowrap;
-    }}
-    .hdr-brand {{
-      margin-top:8px; font-size:14px; font-weight:bold;
-      color:{theme.brand_color};
-    }}
-    .hdr-title {{
-      margin-top:10px; font-size:22px; font-weight:900;
-      color:{theme.pill_color};
-    }}
-    .hdr-meta {{ margin-top:6px; font-size:13px; color:{theme.meta_color}; }}
-
-    /* ── کارت‌ها ── */
-    .body {{ padding:14px 16px 12px 16px; }}
-    .cards {{
-      display:grid;
-      grid-template-columns:repeat(auto-fit,minmax(140px,1fr));
-      gap:10px; margin-bottom:12px;
-    }}
-    .card {{
-      border:1px solid var(--border); border-radius:12px;
-      padding:12px; background:#fff;
-    }}
-    .card-title {{ font-size:14px; color:var(--muted); font-weight:650; }}
-    .card-value {{ margin-top:8px; font-size:32px; font-weight:900; font-variant-numeric:tabular-nums; }}
-    .card-sub   {{ margin-top:4px; font-size:14px; color:var(--muted); }}
-
-    /* ── گرید و پانل ── */
-    .grid {{ display:grid; gap:12px; align-items:start; margin-top:4px; }}
-    .panel {{ border:1px solid var(--border); border-radius:12px; background:#fff; overflow:hidden; }}
-    .panel-title {{
-      padding:10px 14px; background:#f8fafc; border-bottom:1px solid var(--border);
-      font-size:14px; color:var(--muted);
-      display:flex; justify-content:space-between; gap:8px; flex-wrap:wrap;
-    }}
-    .panel-title strong {{ color:#111827; font-weight:850; }}
-
-    /* ── نمودار ── */
-    .chart {{ padding:10px; text-align:center; }}
-    .chart img {{
-      max-width:90%; max-height:230px;
-      border-radius:10px; border:1px solid var(--border);
-    }}
-
-    /* ── جدول ── */
-    .tablewrap {{ overflow:auto; }}
-    table {{ width:100%; border-collapse:collapse; table-layout:fixed; font-size:14px; }}
-    thead th {{
-      position:sticky; top:0; z-index:2; background:#f3f4f6;
-      color:#111827; text-align:right;
-      padding:10px 12px; border-bottom:1px solid var(--border);
-      white-space:nowrap;
-    }}
-    tbody td {{
-      padding:10px 12px; border-bottom:1px solid var(--border);
-      vertical-align:top; word-break:break-word;
-    }}
-    td.num {{ text-align:center; white-space:nowrap; font-variant-numeric:tabular-nums; }}
-    .col-st  {{ width:24%; }}
-    .col-pr  {{ width:38%; }}
-    .col-cnt {{ width:19%; }}
-    .col-pct {{ width:19%; }}
-
-    /* ── فوتر ── */
-    .footer {{
-      padding:10px 16px 12px 16px; border-top:1px solid var(--border);
-      color:var(--muted); font-size:13px;
-      display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap;
-      background:#fff;
-    }}
-    .footer a {{ color:inherit; text-decoration:underline; }}
-
-    /* ── چاپ ── */
-    @media print {{
-      body {{ background:#fff; }}
-      .wrap {{ padding:0; }}
-      .page {{ box-shadow:none; border:none; border-radius:0; }}
-      .tablewrap {{ max-height:none !important; overflow:visible; }}
-      .grid {{ grid-template-columns:1fr !important; }}
-      thead {{ display:table-header-group; }}
-      .footer {{
-        position:fixed; left:9mm; right:9mm; bottom:8mm;
-        border-top:1px solid #ddd; background:#fff;
-      }}
-    }}
-"""
+        return _REPORT_CSS_TEMPLATE.format(
+            font_size_px=theme.font_size_px,
+            font_family=DEFAULT_FONT_FAMILY,
+            body_bg=theme.body_bg,
+            body_padding=theme.body_padding,
+            page_shadow=theme.page_shadow,
+            header_pad=theme.header_pad,
+            header_bg=theme.header_bg,
+            pill_border=theme.pill_border,
+            pill_bg=theme.pill_bg,
+            pill_color=theme.pill_color,
+            brand_color=theme.brand_color,
+            meta_color=theme.meta_color,
+        )
 
     # ══════════════════════════════════════════════
     # خروجی‌ها
@@ -1108,7 +1173,7 @@ class ChartDialog(QDialog):
 
     def save_report_html(self) -> None:
         """ذخیره گزارش HTML و پیشنهاد باز کردن در مرورگر."""
-        base = self._sanitize_filename(self.context_title)
+        base = _sanitize_filename(self.context_title)
         path, _ = QFileDialog.getSaveFileName(
             self, "ذخیره گزارش HTML",
             f"{base}.html",
@@ -1156,7 +1221,7 @@ class ChartDialog(QDialog):
             QMessageBox.information(self, "اطلاع", "داده‌ای برای خروجی وجود ندارد.")
             return
 
-        base = self._sanitize_filename(f"status_priority_{self.context_title}")
+        base = _sanitize_filename(f"status_priority_{self.context_title}")
         path, _ = QFileDialog.getSaveFileName(
             self, "خروجی اکسل",
             f"{base}.xlsx",
@@ -1214,8 +1279,9 @@ class ChartDialog(QDialog):
 
             color_hex = STATUS_COLORS.get(row.status)
             if color_hex:
-                argb = self._hex_to_argb(color_hex, alpha="22")
-                row_fill = PatternFill("solid", fgColor=argb)
+                # ✅ استفاده از رنگ روشن‌شده به‌جای ARGB با آلفا (که openpyxl نادیده می‌گیرد)
+                light_hex = _lighten_hex(color_hex, factor=0.82)
+                row_fill = PatternFill("solid", fgColor=light_hex)
                 for ci in range(1, 5):
                     ws.cell(row=ri, column=ci).fill = row_fill
 
@@ -1224,7 +1290,7 @@ class ChartDialog(QDialog):
         if total_count > 0:
             sum_row  = len(rows) + 2
             sum_font = Font(bold=True, size=11)
-            sum_fill = PatternFill("solid", fgColor="FFEFF6FF")
+            sum_fill = PatternFill("solid", fgColor="EFF6FF")
 
             ws.cell(row=sum_row, column=1, value="مجموع").font = sum_font
             ws.cell(row=sum_row, column=3, value=total_count).font = sum_font
@@ -1259,7 +1325,7 @@ class ChartDialog(QDialog):
             QMessageBox.information(self, "اطلاع", "داده‌ای برای خروجی وجود ندارد.")
             return
 
-        base = self._sanitize_filename(f"status_priority_{self.context_title}")
+        base = _sanitize_filename(f"status_priority_{self.context_title}")
         path, _ = QFileDialog.getSaveFileName(
             self, "خروجی CSV",
             f"{base}.csv",
@@ -1275,14 +1341,17 @@ class ChartDialog(QDialog):
             with open(path, "w", newline="", encoding="utf-8-sig") as fh:
                 writer = csv.writer(fh)
                 writer.writerow(["عنوان گزارش", self.context_title])
-                writer.writerow(["تاریخ تولید", datetime.now().strftime("%Y-%m-%d %H:%M:%S")])
+                writer.writerow(["تاریخ تولید", _format_shamsi_timestamp()])
                 writer.writerow([])
-                writer.writerow(["وضعیت", "اولویت", "تعداد", "درصد"])
+                writer.writerow(["وضعیت", "اولویت", "تعداد", f"درصد ({PERCENT_SUFFIX})"])
                 for r in rows:
-                    writer.writerow([r.status, r.priority, r.count, f"{r.pct:.1f}%"])
+                    writer.writerow([
+                        r.status, r.priority, r.count,
+                        f"{r.pct:.1f}{PERCENT_SUFFIX}",
+                    ])
                 total = sum(r.count for r in rows)
                 if total:
-                    writer.writerow(["مجموع", "", total, "100%"])
+                    writer.writerow(["مجموع", "", total, f"100{PERCENT_SUFFIX}"])
 
             QMessageBox.information(self, "✅ انجام شد", f"خروجی CSV ذخیره شد:\n{path}")
             logger.info("CSV exported to %s", path)
@@ -1293,8 +1362,11 @@ class ChartDialog(QDialog):
             logger.exception("Unexpected error in CSV export.")
             QMessageBox.critical(self, "خطا", f"خطای غیرمنتظره:\n{exc}")
 
-    def print_report(self, include_chart: bool = False) -> None:
-        """چاپ گزارش HTML روی پرینتر (A4 افقی)."""
+    def print_report(self, include_chart: bool = True) -> None:
+        """
+        چاپ گزارش HTML روی پرینتر (A4 افقی).
+        `include_chart` پیش‌فرض True برای هماهنگی با خروجی HTML.
+        """
         printer = QPrinter(QPrinter.PrinterMode.HighResolution)
 
         try:
