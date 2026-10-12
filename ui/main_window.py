@@ -82,6 +82,7 @@ from ui.workflow_dialog import WorkflowDialog
 from ui.operations_dashboard import OperationsDashboard
 from ui.tracking_dialog import TrackingDialog
 from utils.date_utils import to_gregorian, to_shamsi, today_shamsi
+from services.meeting_number_report import MeetingNumberReportGenerator
 
 logger = logging.getLogger(__name__)
 
@@ -813,6 +814,26 @@ class MainWindow(QMainWindow):
         self.search.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
         self.search.setAlignment(Qt.AlignmentFlag.AlignRight)
 
+        self.meeting_no_filter = QLineEdit()
+        self.meeting_no_filter.setPlaceholderText("مثلاً 10")
+        self.meeting_no_filter.setClearButtonEnabled(True)
+        self.meeting_no_filter.setFixedWidth(140)
+        self.meeting_no_filter.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
+        self.meeting_no_filter.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        self.meeting_no_filter.setToolTip(
+            "فیلتر شماره صورتجلسه: هر عبارتی که داخل شماره باشد (مثال: 10 → 10، 100، A-10-B)"
+        )
+
+        self.btn_meeting_no_report = QPushButton("📄 گزارش شماره")
+        self.btn_meeting_no_report.setObjectName("btn_primary")
+        self.btn_meeting_no_report.setToolTip(
+            "جستجوی شماره صورتجلسه (حاوی) و تولید گزارش HTML — محل کار | روز مانده | موضوع | پیمانکار"
+        )
+
+        bar.addWidget(QLabel("شماره صورتجلسه:"))
+        bar.addWidget(self.meeting_no_filter)
+        bar.addWidget(self.btn_meeting_no_report)
+        bar.addSpacing(12)
         bar.addWidget(QLabel("جستجوی سریع:"))
         bar.addWidget(self.search, stretch=1)
         return bar
@@ -845,6 +866,8 @@ class MainWindow(QMainWindow):
 
     def _connect_signals(self) -> None:
         self.search.textChanged.connect(self.search_timer.start)
+        self.meeting_no_filter.returnPressed.connect(self._report_by_meeting_number)
+        self.btn_meeting_no_report.clicked.connect(self._report_by_meeting_number)
         for cb in (self.status_filter, self.priority_filter, self.employer_filter,
                    self.contractor_filter, self.discipline_filter):
             cb.currentTextChanged.connect(self._on_filters_changed)
@@ -1207,6 +1230,38 @@ class MainWindow(QMainWindow):
     def _on_filters_changed(self) -> None:
         self.page = 0
         self.reload_page()
+
+    def _report_by_meeting_number(self) -> None:
+        """فیلتر حاوی روی شماره صورتجلسه + گزارش HTML."""
+        q = (self.meeting_no_filter.text() or "").strip()
+        if not q:
+            QMessageBox.information(
+                self,
+                "فیلتر شماره",
+                "عبارت فیلتر شماره صورتجلسه را وارد کنید.\nمثال: 10",
+            )
+            self.meeting_no_filter.setFocus()
+            return
+        try:
+            meetings = self.db.search_by_meeting_number_contains(q, limit=500)
+        except Exception as exc:
+            logger.exception("meeting number search failed")
+            QMessageBox.critical(self, "خطا", f"جستجو ناموفق بود:\n{exc}")
+            return
+        if not meetings:
+            QMessageBox.information(
+                self,
+                "نتیجه‌ای نیست",
+                f"هیچ صورتجلسه‌ای که شماره آن حاوی «{q}» باشد یافت نشد.",
+            )
+            return
+        self.search.setText(q)
+        try:
+            gen = MeetingNumberReportGenerator(meetings, q, parent=self)
+            gen.generate_and_open()
+        except Exception as e:
+            logger.exception("meeting number report failed")
+            QMessageBox.critical(self, "خطا", f"تولید گزارش ناموفق بود:\n{e}")
 
     def reload_meta(self) -> None:
         def _fill(cb: QComboBox, vals: List[str]) -> None:
