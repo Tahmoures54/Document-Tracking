@@ -125,6 +125,7 @@ class DatabaseManager:
         self._migrate_add_soft_delete()
         self._migrate_add_tracking_fields()
         self._migrate_add_location()
+        self._migrate_add_supervision_date()
 
         # بهینه‌سازی سرعت جستجوها
         self._ensure_indexes()
@@ -188,6 +189,22 @@ class DatabaseManager:
             logger.warning("Migration '_migrate_add_location' failed: %s", exc)
 
 
+
+    def _migrate_add_supervision_date(self) -> None:
+        """افزودن ستون‌های مسیر نظارت: ارسال به نظارت + ورود به دفتر نظارت."""
+        try:
+            with self.engine.begin() as conn:
+                cols = [row[1] for row in conn.execute(text("PRAGMA table_info(meetings);")).fetchall()]
+                if "sent_to_supervision_date" not in cols:
+                    conn.execute(text("ALTER TABLE meetings ADD COLUMN sent_to_supervision_date DATE;"))
+                    logger.info("Migration Applied: Column 'sent_to_supervision_date' added.")
+                if "supervision_entry_date" not in cols:
+                    conn.execute(text("ALTER TABLE meetings ADD COLUMN supervision_entry_date DATE;"))
+                    logger.info("Migration Applied: Column 'supervision_entry_date' added.")
+        except Exception as exc:
+            logger.warning("Migration '_migrate_add_supervision_date' failed: %s", exc)
+
+
     def _ensure_indexes(self) -> None:
         """ایجاد ایندکس‌های تخصصی و مرکب جهت افزایش سرعت لود جداول پر حجم."""
         indexes = [
@@ -200,6 +217,8 @@ class DatabaseManager:
             "CREATE INDEX IF NOT EXISTS idx_meetings_drawing    ON meetings(drawing_number);",
             "CREATE INDEX IF NOT EXISTS idx_meetings_discipline ON meetings(discipline);",
             "CREATE INDEX IF NOT EXISTS idx_meetings_location   ON meetings(location);",
+            "CREATE INDEX IF NOT EXISTS idx_meetings_supervision ON meetings(sent_to_supervision_date);",
+            "CREATE INDEX IF NOT EXISTS idx_meetings_sup_entry   ON meetings(supervision_entry_date);",
             "CREATE INDEX IF NOT EXISTS idx_meetings_deleted    ON meetings(is_deleted);",
             "CREATE INDEX IF NOT EXISTS idx_meetings_sent       ON meetings(sent_to_contractor_date);",
             "CREATE INDEX IF NOT EXISTS idx_audit_ts            ON audit_logs(ts);",
@@ -743,12 +762,12 @@ class DatabaseManager:
     def initialize_workflow(self, meeting_id: int) -> None:
         """ثبت سوابق و مراحل گردش کار شش‌گانه سازمانی به صورت پیش‌فرض."""
         steps = [
-            ("ورود به دفتر کارفرما",              1),
-            ("ورود به دفتر رئیس دفتر فنی",       2),
-            ("ورود به دفتر کارشناس",              3),
-            ("ورود مجدد به دفتر رئیس دفتر فنی",  4),
-            ("خروج از دفتر مدیر سایت",            5),
-            ("تحویل به پیمانکار",                 6),
+            ("دریافت در دفتر کارفرما",     1),
+            ("ارجاع به رئیس دفتر فنی",      2),
+            ("بررسی کارشناس",               3),
+            ("تأیید رئیس دفتر فنی",         4),
+            ("تأیید مدیر سایت",             5),
+            ("ابلاغ به پیمانکار",            6),
         ]
         with self.session() as sess:
             exists = sess.query(WorkflowStep.id).filter(WorkflowStep.meeting_id == meeting_id).first()
