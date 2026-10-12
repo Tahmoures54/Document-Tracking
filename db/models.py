@@ -91,3 +91,270 @@ ROLE_USER    = "user"
 ROLE_VIEWER  = "viewer"
 
 ROLES: List[str] = [ROLE_ADMIN, ROLE_MANAGER, ROLE_EDITOR, ROLE_USER, ROLE_VIEWER]
+
+
+class Meeting(Base):
+    """مدل اطلاعات شناسنامه‌ای و ممیزی صورتجلسه."""
+
+    __tablename__ = "meetings"
+
+    id = Column(Integer, primary_key=True)
+
+    # تاریخ‌های کنترل زمانی پروژه
+    entry_date = Column(Date, default=date.today, index=True)
+    meeting_date = Column(Date, nullable=False, index=True)
+    due_date = Column(Date, nullable=False, index=True)
+    contract_date = Column(Date)
+    
+    # 🎯 تاریخ کلیدی: ابلاغ به پیمانکار = بسته شدن پرونده = تاریخ پاسخ پیمانکار = اتمام کار
+    sent_to_contractor_date = Column(Date, index=True)
+    closing_date = Column(Date)
+
+    # تاریخ پاسخ پیمانکار (برای حفظ سازگاری فیزیکی با دیتابیس قدیمی نگهداری می‌شود)
+    contractor_response_date = Column(Date)
+
+    # شناسه‌ها و اطلاعات مرجع اسناد فنی
+    meeting_number = Column(String, nullable=False, unique=True, index=True)
+    drawing_number = Column(String, index=True)
+    contract_number = Column(String, index=True)
+
+    # ارکان پروژه
+    employer = Column(String, index=True)
+    consultant = Column(String)
+    contractor = Column(String, index=True)
+
+    # اطلاعات محتوایی و ضمائم
+    subject = Column(String, nullable=False, index=True)
+    file_link = Column(String)
+    attachment_count = Column(
+        Integer,
+        default=0,
+        server_default="0",
+        nullable=False,
+    )
+
+    # دیسیپلین فنی و وضعیت‌های اجرایی
+    discipline = Column(String, index=True)
+    status = Column(
+        String,
+        default=STATUS_PENDING,
+        server_default=STATUS_PENDING,
+        nullable=False,
+        index=True,
+    )
+    priority = Column(
+        String,
+        default=PRIORITY_MEDIUM,
+        server_default=PRIORITY_MEDIUM,
+        nullable=False,
+        index=True,
+    )
+
+    # مدیریت حذف منطقی (Soft Delete)
+    is_deleted = Column(
+        Boolean,
+        default=False,
+        server_default="0",
+        nullable=False,
+        index=True,
+    )
+    deleted_at = Column(DateTime)
+    deleted_by = Column(String)
+
+    # فیلدهای زمان‌بندی سیستمی
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+    # رابطه با مراحل گردش کار
+    workflow_steps = relationship(
+        "WorkflowStep",
+        back_populates="meeting",
+        cascade="all, delete-orphan",
+        order_by="WorkflowStep.step_order",
+    )
+
+    # ایندکس‌های ترکیبی برای کوئری‌های سریع‌تر
+    __table_args__ = (
+        Index("idx_meeting_status_priority", "status", "priority"),
+        Index("idx_meeting_active_status", "is_deleted", "status"),
+        Index("idx_meeting_due_active", "due_date", "is_deleted", "status"),
+        Index("idx_meeting_employer_contractor", "employer", "contractor"),
+        Index("idx_meeting_discipline_priority", "discipline", "priority"),
+        Index("idx_meeting_dispatch_status", "sent_to_contractor_date", "status"),
+    )
+
+    # 🎯 نگاشت هدرهای فارسی به فیلدهای مدل جهت نمایش در گرید اصلی پنجره اصلی
+    HEADER_TO_ATTR: Dict[str, str] = {
+        "ردیف":                     "id",
+        "تاریخ ورود":               "entry_date",
+        "تاریخ صورتجلسه":           "meeting_date",
+        "شماره صورتجلسه":           "meeting_number",
+        "تعداد پیوست":              "attachment_count",
+        "شماره نقشه":               "drawing_number",
+        "کارفرما":                  "employer",
+        "مشاور":                    "consultant",
+        "پیمانکار":                 "contractor",
+        "شماره قرارداد":            "contract_number",
+        "تاریخ قرارداد":            "contract_date",
+        "موضوع":                    "subject",
+        "دیسیپلین":                 "discipline",
+        "تاریخ ارسال به پیمانکار":  "sent_to_contractor_date",
+        "وضعیت":                    "status",
+        "اولویت":                   "priority",
+        "مهلت انجام":               "due_date",
+    }
+
+    @classmethod
+    def headers(cls) -> List[str]:
+        return list(cls.HEADER_TO_ATTR.keys())
+
+    def to_row(self, headers: Optional[List[str]] = None) -> List[Any]:
+        if headers is None:
+            headers = self.headers()
+        out: List[Any] = []
+        for h in headers:
+            attr = self.HEADER_TO_ATTR.get(h)
+            val = getattr(self, attr, "") if attr else ""
+            if isinstance(val, (date, datetime)) and val:
+                val = val.isoformat()
+            out.append(val if val is not None else "")
+        return out
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "entry_date": self.entry_date.isoformat() if self.entry_date else None,
+            "meeting_date": self.meeting_date.isoformat() if self.meeting_date else None,
+            "meeting_number": self.meeting_number,
+            "attachment_count": self.attachment_count,
+            "drawing_number": self.drawing_number,
+            "employer": self.employer,
+            "consultant": self.consultant,
+            "contractor": self.contractor,
+            "contract_number": self.contract_number,
+            "contract_date": self.contract_date.isoformat() if self.contract_date else None,
+            "subject": self.subject,
+            "discipline": self.discipline,
+            "sent_to_contractor_date": self.sent_to_contractor_date.isoformat() if self.sent_to_contractor_date else None,
+            "file_link": self.file_link,
+            "status": self.status,
+            "priority": self.priority,
+            "due_date": self.due_date.isoformat() if self.due_date else None,
+            "closing_date": self.closing_date.isoformat() if self.closing_date else None,
+            "contractor_response_date": self.contractor_response_date.isoformat() if self.contractor_response_date else None,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            "is_deleted": self.is_deleted,
+            "deleted_at": self.deleted_at.isoformat() if self.deleted_at else None,
+            "deleted_by": self.deleted_by,
+            "is_delayed": self.is_delayed,
+            "is_open": self.is_open,
+            "is_dispatched": self.is_dispatched,
+            "days_until_due": self.days_until_due,
+            "dispatch_days": self.dispatch_days,
+            "progress_percentage": self.progress_percentage,
+        }
+
+    @property
+    def is_delayed(self) -> bool:
+        if not self.due_date:
+            return False
+        if self.status in CLOSED_STATUSES:
+            return False
+        if self.is_dispatched:
+            return False
+        return self.due_date < date.today()
+
+    @property
+    def is_open(self) -> bool:
+        return self.status in OPEN_STATUSES
+
+    @property
+    def is_closed(self) -> bool:
+        return self.status in CLOSED_STATUSES
+
+    @property
+    def is_dispatched(self) -> bool:
+        return self.sent_to_contractor_date is not None
+
+    @property
+    def days_until_due(self) -> Optional[int]:
+        if not self.due_date:
+            return None
+        return (self.due_date - date.today()).days
+
+    @property
+    def dispatch_days(self) -> Optional[int]:
+        if not self.meeting_date or not self.sent_to_contractor_date:
+            return None
+        return (self.sent_to_contractor_date - self.meeting_date).days
+
+    @property
+    def has_attachments(self) -> bool:
+        return (self.attachment_count or 0) > 0
+
+    @property
+    def current_step(self) -> Optional["WorkflowStep"]:
+        if not self.workflow_steps:
+            return None
+        for step in self.workflow_steps:
+            if step.status in ("pending", "in_progress"):
+                return step
+        return self.workflow_steps[-1]
+
+    @property
+    def progress_percentage(self) -> int:
+        if not self.workflow_steps:
+            return 0
+        total = len(self.workflow_steps)
+        completed = sum(1 for s in self.workflow_steps if s.status == "completed")
+        return int((completed / total) * 100)
+
+    @property
+    def current_responsible(self) -> str:
+        step = self.current_step
+        if step and step.responsible_person:
+            return step.responsible_person.strip()
+        return ""
+
+    @property
+    def current_stage_name(self) -> str:
+        step = self.current_step
+        if step and step.step_name:
+            return step.step_name.strip()
+        return ""
+
+    def set_dispatched_to_contractor(self, dispatch_date: Optional[date] = None) -> None:
+        d = dispatch_date or date.today()
+        self.sent_to_contractor_date = d
+        self.closing_date = d
+        self.contractor_response_date = d
+        self.status = STATUS_COMPLETED
+
+    def validate(self) -> Optional[str]:
+        if not self.meeting_number or not self.meeting_number.strip():
+            return "شماره صورتجلسه الزامی است."
+        if not self.subject or not self.subject.strip():
+            return "موضوع صورتجلسه الزامی است."
+        if not self.meeting_date:
+            return "تاریخ صورتجلسه الزامی است."
+        if not self.due_date:
+            return "مهلت انجام الزامی است."
+        if self.meeting_date and self.due_date and self.due_date < self.meeting_date:
+            return "مهلت انجام نمی‌تواند قبل از تاریخ صورتجلسه باشد."
+        if self.status and self.status not in STATUSES:
+            return f"وضعیت «{self.status}» نامعتبر است."
+        if self.priority and self.priority not in PRIORITIES:
+            return f"اولویت «{self.priority}» نامعتبر است."
+        if self.attachment_count is not None and self.attachment_count < 0:
+            return "تعداد پیوست نمی‌تواند منفی باشد."
+        if self.sent_to_contractor_date and self.meeting_date and self.sent_to_contractor_date < self.meeting_date:
+            return "تاریخ ارسال به پیمانکار نمی‌تواند قبل از تاریخ صورتجلسه باشد."
+        return None
+
+    def __repr__(self) -> str:
+        return f"<Meeting(id={self.id}, number='{self.meeting_number}', discipline='{self.discipline}', status='{self.status}')>"
