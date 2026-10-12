@@ -475,6 +475,7 @@ class StatusRowDelegate(QStyledItemDelegate):
         # همچنان با موتور استاندارد Qt و تنظیمات مدل رسم می‌شوند.
         opt.backgroundBrush = QBrush()
         opt.state &= ~QStyle.StateFlag.State_Selected
+        opt.state &= ~QStyle.StateFlag.State_MouseOver
         opt.palette.setColor(
             QPalette.ColorRole.Text,
             QColor("#0C4A6E") if selected else (
