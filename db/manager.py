@@ -428,6 +428,36 @@ class DatabaseManager:
             )
 
 
+
+    def search_by_meeting_number_contains(
+        self,
+        fragment: str,
+        limit: int = 500,
+    ) -> List[Meeting]:
+        """
+        جستجوی شماره صورتجلسه به صورت حاوی (contains).
+        حساس به کاراکترهای واردشده؛ بدون تبدیل حروف.
+        مثال: '10' همه شماره‌هایی که 10 داخلشان است را برمی‌گرداند.
+        """
+        frag = (fragment or "").strip()
+        if not frag:
+            return []
+
+        like = f"%{frag}%"
+        with self.session() as sess:
+            rows = (
+                sess.query(Meeting)
+                .filter(
+                    Meeting.is_deleted.is_(False),
+                    Meeting.meeting_number.like(like),
+                )
+                .order_by(Meeting.meeting_number.asc())
+                .limit(limit)
+                .all()
+            )
+            return list(rows)
+
+
     def find_similar_meetings(
         self,
         contractor: Optional[str] = None,
