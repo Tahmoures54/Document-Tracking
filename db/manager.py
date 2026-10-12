@@ -15,7 +15,7 @@ import sqlite3
 from datetime import date, datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
-from sqlalchemy import asc, and_, case, create_engine, desc, func, or_, text
+from sqlalchemy import asc, and_, case, create_engine, desc, func, inspect, or_, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, selectinload, sessionmaker
 
@@ -64,23 +64,28 @@ class DatabaseManager:
     """مدیر پایگاه داده سیستم پیگیری اسناد و گردش کار صورتجلسات."""
 
     def __init__(self, db_path: str):
-        self.db_path = os.path.abspath(db_path)
-
-        # تبدیل مسیر دیتابیس به فرمت استاندارد URL برای SQLAlchemy
-        normalized_path = self.db_path.replace(os.sep, "/")
-        sqlite_url = f"sqlite:///{normalized_path}"
-        
-        # پیکربندی اتصال به گونه‌ای که تراکنش‌های ترد‌های موازی قفل نشوند
+        """پشتیبانی از SQLite محلی و PostgreSQL مرکزی روی شبکه."""
+        value = str(db_path or "").strip()
+        if not value:
+            raise ValueError("مسیر دیتابیس یا آدرس اتصال تنظیم نشده است.")
+        if "://" in value:
+            database_url = value
+            if database_url.startswith("postgres://"):
+                database_url = "postgresql+psycopg://" + database_url[len("postgres://"):]
+            elif database_url.startswith("postgresql://"):
+                database_url = "postgresql+psycopg://" + database_url[len("postgresql://"):]
+            self.db_path = database_url
+            connect_args = {"timeout": 20, "check_same_thread": False} if database_url.startswith("sqlite:") else {}
+        else:
+            self.db_path = os.path.abspath(value)
+            normalized_path = self.db_path.replace(os.sep, "/")
+            database_url = f"sqlite:///{normalized_path}"
+            connect_args = {"timeout": 20, "check_same_thread": False}
         self.engine = create_engine(
-            sqlite_url,
-            future=True,
-            echo=False,
-            connect_args={
-                "timeout": 20,
-                "check_same_thread": False,  # مجاز بودن دسترسی از ترد‌های کمکی مانند Workerها
-            },
+            database_url, future=True, echo=False,
+            pool_pre_ping=not database_url.startswith("sqlite:"),
+            connect_args=connect_args,
         )
-
         self.SessionLocal = sessionmaker(
             bind=self.engine,
             autoflush=False,
@@ -104,18 +109,19 @@ class DatabaseManager:
     # تنظیمات کارایی، ایندکس‌ها و لایه‌های مهاجرت (Migrations)
     # ─────────────────────────────────────────────────────────────
     def _init_db(self) -> None:
-        """فعال‌سازی WAL Mode، ساخت جداول، اجرای مهاجرت‌ها و ایندکس‌گذاری صریح."""
-        try:
-            with self.engine.begin() as conn:
-                # اعمال تنظیمات سرعت و کارایی فوق‌العاده بالا برای SQLite
-                conn.execute(text("PRAGMA foreign_keys=ON;"))
-                conn.execute(text("PRAGMA journal_mode=WAL;"))  # عدم قفل شدن خواندن در حین نوشتن
-                conn.execute(text("PRAGMA synchronous=NORMAL;"))
-                conn.execute(text("PRAGMA temp_store=MEMORY;"))
-                conn.execute(text("PRAGMA busy_timeout=8000;"))
-                conn.execute(text("PRAGMA cache_size=-20000;"))  # تخصیص ۲۰ مگابایت حافظه کش رم
-        except Exception as exc:
-            logger.warning("PRAGMA performance configuration failed: %s", exc)
+        """ساخت جداول و اجرای مهاجرت‌ها؛ تنظیمات PRAGMA فقط برای SQLite."""
+        if self.engine.dialect.name == "sqlite":
+            try:
+                with self.engine.begin() as conn:
+                    conn.execute(text("PRAGMA foreign_keys=ON;"))
+                    # WAL برای دیتابیس محلی است؛ فایل SQLite شبکه‌ای برای چند کلاینت توصیه نمی‌شود.
+                    conn.execute(text("PRAGMA journal_mode=WAL;"))
+                    conn.execute(text("PRAGMA synchronous=NORMAL;"))
+                    conn.execute(text("PRAGMA busy_timeout=8000;"))
+                    conn.execute(text("PRAGMA temp_store=MEMORY;"))
+                    conn.execute(text("PRAGMA cache_size=-20000;"))
+            except Exception as exc:
+                logger.warning("SQLite performance configuration failed: %s", exc)
 
         # ساخت جداول در صورت عدم وجود
         Base.metadata.create_all(self.engine)
@@ -131,12 +137,15 @@ class DatabaseManager:
         self._ensure_indexes()
         self._ensure_default_admin()
 
+    def _column_names(self, table_name: str) -> set[str]:
+        """نام ستون‌ها را مستقل از نوع پایگاه داده برمی‌گرداند."""
+        return {column["name"] for column in inspect(self.engine).get_columns(table_name)}
+
     def _migrate_add_discipline(self) -> None:
         """افزودن ستون دیسیپلین به جدول meetings در دیتابیس‌های قدیمی."""
         try:
             with self.engine.begin() as conn:
-                result = conn.execute(text("PRAGMA table_info(meetings);"))
-                columns = [row[1] for row in result.fetchall()]
+                columns = self._column_names("meetings")
                 if "discipline" not in columns:
                     conn.execute(text("ALTER TABLE meetings ADD COLUMN discipline VARCHAR;"))
                     logger.info("Migration Applied: Column 'discipline' added successfully.")
@@ -147,8 +156,7 @@ class DatabaseManager:
         """افزودن قابلیت حذف نرم (Soft Delete) به جداول قدیمی بدون از دست رفتن داده‌ها."""
         try:
             with self.engine.begin() as conn:
-                result = conn.execute(text("PRAGMA table_info(meetings);"))
-                columns = [row[1] for row in result.fetchall()]
+                columns = self._column_names("meetings")
                 if "is_deleted" not in columns:
                     conn.execute(text("ALTER TABLE meetings ADD COLUMN is_deleted BOOLEAN NOT NULL DEFAULT 0;"))
                 if "deleted_at" not in columns:
@@ -166,11 +174,11 @@ class DatabaseManager:
         """
         try:
             with self.engine.begin() as conn:
-                cols = [row[1] for row in conn.execute(text("PRAGMA table_info(meetings);")).fetchall()]
+                cols = self._column_names("meetings")
                 if "contractor_response_date" not in cols:
                     conn.execute(text("ALTER TABLE meetings ADD COLUMN contractor_response_date DATE;"))
 
-                acols = [row[1] for row in conn.execute(text("PRAGMA table_info(audit_logs);")).fetchall()]
+                acols = self._column_names("audit_logs")
                 if "meeting_id" not in acols:
                     conn.execute(text("ALTER TABLE audit_logs ADD COLUMN meeting_id INTEGER;"))
         except Exception as exc:
@@ -181,7 +189,7 @@ class DatabaseManager:
         """افزودن ستون محل کار (location) به جدول meetings."""
         try:
             with self.engine.begin() as conn:
-                cols = [row[1] for row in conn.execute(text("PRAGMA table_info(meetings);")).fetchall()]
+                cols = self._column_names("meetings")
                 if "location" not in cols:
                     conn.execute(text("ALTER TABLE meetings ADD COLUMN location VARCHAR;"))
                     logger.info("Migration Applied: Column 'location' added successfully.")
@@ -194,7 +202,7 @@ class DatabaseManager:
         """افزودن ستون‌های مسیر نظارت: ارسال به نظارت + ورود به دفتر نظارت."""
         try:
             with self.engine.begin() as conn:
-                cols = [row[1] for row in conn.execute(text("PRAGMA table_info(meetings);")).fetchall()]
+                cols = self._column_names("meetings")
                 if "sent_to_supervision_date" not in cols:
                     conn.execute(text("ALTER TABLE meetings ADD COLUMN sent_to_supervision_date DATE;"))
                     logger.info("Migration Applied: Column 'sent_to_supervision_date' added.")
