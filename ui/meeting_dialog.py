@@ -2,7 +2,8 @@
 """
 ui.meeting_dialog
 ماژول دیالوگ ثبت/ویرایش صورتجلسه
-نسخه ۵: نوار پیشرفت گرادیانی + پیشنهاد خودکار مهلت انجام (۳ روز بعد) + Toast بصری
+نسخه ۵.۱: نوار پیشرفت گرادیانی + پیشنهاد خودکار مهلت انجام (۳ روز بعد) + Toast بصری
+           + رفع مشکل تغییر مقدار کامبوباکس/اسپین‌باکس با چرخ غربیلک ماوس
 """
 from __future__ import annotations
 
@@ -64,6 +65,7 @@ PROGRESS_FIELDS: Dict[str, int] = {
     "consultant": 1,
     "contractor": 1,
     "discipline": 1,
+    "location": 1,
     "contract_number": 1,
     "contract_date": 1,
     "drawing_number": 1,
@@ -88,6 +90,7 @@ SMART_COPY_FIELDS = {
     "consultant",
     "contractor",
     "discipline",
+    "location",
     "contract_number",
     "contract_date",
     "drawing_number",
@@ -148,6 +151,31 @@ def _is_valid_shamsi(text: str) -> bool:
         is_leap = (y % 33) in {1, 5, 9, 13, 17, 22, 26, 30}
         return 1 <= d <= (30 if is_leap else 29)
     return False
+
+
+# ═══════════════════════════════════════════════
+#  ویجت‌های سفارشی: جلوگیری از تغییر مقدار با چرخ ماوس
+# ═══════════════════════════════════════════════
+
+
+class NoScrollComboBox(QComboBox):
+    """QComboBox که فقط با چرخ ماوس وقتی فوکوس دارد تغییر می‌کند."""
+
+    def wheelEvent(self, event):  # noqa: N802
+        if self.hasFocus():
+            super().wheelEvent(event)
+        else:
+            event.ignore()
+
+
+class NoScrollSpinBox(QSpinBox):
+    """QSpinBox که فقط با چرخ ماوس وقتی فوکوس دارد تغییر می‌کند."""
+
+    def wheelEvent(self, event):  # noqa: N802
+        if self.hasFocus():
+            super().wheelEvent(event)
+        else:
+            event.ignore()
 
 
 # ═══════════════════════════════════════════════
@@ -455,6 +483,7 @@ class MeetingDialog(QDialog):
                 )
 
         self._add_combo("discipline", "دیسیپلین", DISCIPLINES)
+        self._add_combo("location", "محل کار")
         self._add_combo(
             "priority", "اولویت صورتجلسه", ["بالا", "متوسط", "پایین"]
         )
@@ -482,7 +511,8 @@ class MeetingDialog(QDialog):
         h.setContentsMargins(0, 0, 0, 0)
         h.setSpacing(8)
 
-        self.spin_attachment_count = QSpinBox()
+        # ← استفاده از NoScrollSpinBox
+        self.spin_attachment_count = NoScrollSpinBox()
         self.spin_attachment_count.setRange(0, 999)
         self.spin_attachment_count.setValue(0)
         self.spin_attachment_count.setMinimumHeight(30)
@@ -567,7 +597,8 @@ class MeetingDialog(QDialog):
     def _add_combo(
         self, key: str, label: str, items: Optional[List[str]] = None
     ) -> QComboBox:
-        combo = QComboBox()
+        # ← استفاده از NoScrollComboBox
+        combo = NoScrollComboBox()
         combo.setEditable(True)
         combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
         combo.setMinimumHeight(30)
