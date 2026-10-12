@@ -26,6 +26,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import declarative_base, relationship
 
@@ -159,7 +160,7 @@ class Meeting(Base):
     is_deleted = Column(
         Boolean,
         default=False,
-        server_default="0",
+        server_default=text("false"),
         nullable=False,
         index=True,
     )
