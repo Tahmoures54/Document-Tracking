@@ -624,21 +624,24 @@ class DatabaseManager:
             )
 
         with self.session() as sess:
-            # بارگذاری ایگرگر (Eager Load) به منظور ممانعت از ایجاد کوئری‌های N+1 سنگین
-            q = (
-                sess.query(Meeting)
-                .options(selectinload(Meeting.workflow_steps))
-                .filter(Meeting.is_deleted.is_(False))
-            )
+            # بدون selectinload: گردش‌کار در UI با یک کوئری دسته‌ای جدا لود می‌شود
+            base_filter = [Meeting.is_deleted.is_(False)]
             if conditions:
-                q = q.filter(and_(*conditions))
+                base_filter.append(and_(*conditions))
 
-            total = q.count()
+            total = (
+                sess.query(func.count(Meeting.id))
+                .filter(*base_filter)
+                .scalar()
+                or 0
+            )
             rows = (
-                q.order_by(direction(column))
-                 .limit(limit)
-                 .offset(offset)
-                 .all()
+                sess.query(Meeting)
+                .filter(*base_filter)
+                .order_by(direction(column))
+                .limit(limit)
+                .offset(offset)
+                .all()
             )
             return rows, int(total)
 
