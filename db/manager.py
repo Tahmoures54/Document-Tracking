@@ -10,7 +10,6 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
-import shutil
 import sqlite3
 from datetime import date, datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
@@ -1046,32 +1045,44 @@ class DatabaseManager:
             conn.execute(text("VACUUM;"))
 
     def backup_database(self, destination: str) -> None:
-        """بکاپ ایمن و زنده (Hot Backup) بدون قفل کردن فرآیندهای خواندن/نوشتن فعال WAL."""
+        """تهیه بکاپ تراکنشی SQLite؛ از کپی خام فایل دیتابیس زنده خودداری می‌شود."""
+        if self.engine.dialect.name != "sqlite":
+            raise NotImplementedError(
+                "بکاپ مستقیم این متد فقط برای SQLite پشتیبانی می‌شود؛ "
+                "برای PostgreSQL از ابزار بکاپ همان سرور استفاده کنید."
+            )
+
         destination = os.path.abspath(destination)
+        source_path = os.path.abspath(self.db_path)
+        if os.path.normcase(destination) == os.path.normcase(source_path):
+            raise ValueError("مسیر فایل بکاپ نباید با فایل دیتابیس اصلی یکسان باشد.")
+
         dest_dir = os.path.dirname(destination)
         if dest_dir and not os.path.isdir(dest_dir):
             os.makedirs(dest_dir, exist_ok=True)
 
+        # فایل موقت مانع جایگزینی بکاپ سالم با خروجی ناقص می‌شود.
+        temporary = destination + ".tmp"
         try:
-            # استفاده از API رسمی برای کپی تراکنشی صفحات دیتابیس
-            src = sqlite3.connect(self.db_path)
-            try:
-                dst = sqlite3.connect(destination)
-                try:
+            if os.path.exists(temporary):
+                os.remove(temporary)
+
+            with sqlite3.connect(source_path, timeout=30) as src:
+                with sqlite3.connect(temporary, timeout=30) as dst:
                     src.backup(dst)
-                    dst.commit()
-                finally:
-                    dst.close()
-            finally:
-                src.close()
+                    result = dst.execute("PRAGMA quick_check").fetchone()
+                    if not result or result[0] != "ok":
+                        raise sqlite3.DatabaseError(
+                            f"Backup integrity check failed: {result!r}"
+                        )
 
-            logger.info("Hot-backup written successfully: %s", destination)
-
+            os.replace(temporary, destination)
+            logger.info("Verified transactional SQLite backup written: %s", destination)
         except Exception as exc:
-            logger.exception("Transactional backup failed, entering fallback copy engine: %s", exc)
             try:
-                shutil.copy2(self.db_path, destination)
-                logger.info("Fallback copy-backup generated: %s", destination)
-            except Exception as copy_exc:
-                logger.exception("Fallback backup engine crashed: %s", copy_exc)
-                raise copy_exc
+                if os.path.exists(temporary):
+                    os.remove(temporary)
+            except OSError:
+                logger.warning("Could not remove incomplete backup file: %s", temporary)
+            logger.exception("Transactional SQLite backup failed: %s", exc)
+            raise RuntimeError(f"تهیه بکاپ دیتابیس ناموفق بود: {exc}") from exc
