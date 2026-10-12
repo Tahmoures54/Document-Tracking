@@ -160,7 +160,7 @@ class DatabaseManager:
                 if "is_deleted" not in columns:
                     conn.execute(text("ALTER TABLE meetings ADD COLUMN is_deleted BOOLEAN NOT NULL DEFAULT FALSE;"))
                 if "deleted_at" not in columns:
-                    conn.execute(text("ALTER TABLE meetings ADD COLUMN deleted_at DATETIME;"))
+                    conn.execute(text("ALTER TABLE meetings ADD COLUMN deleted_at TIMESTAMP;"))
                 if "deleted_by" not in columns:
                     conn.execute(text("ALTER TABLE meetings ADD COLUMN deleted_by VARCHAR;"))
         except SQLAlchemyError as exc:
