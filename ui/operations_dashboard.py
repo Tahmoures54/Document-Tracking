@@ -151,8 +151,8 @@ class OperationsDashboard(QDialog):
     # ─────────────────────────────────────────────────────────────
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
-        root.setContentsMargins(16, 16, 16, 14)
-        root.setSpacing(12)
+        root.setContentsMargins(22, 20, 22, 18)
+        root.setSpacing(16)
 
         # ── نوار سربرگ ──
         header_layout = QHBoxLayout()
@@ -162,10 +162,10 @@ class OperationsDashboard(QDialog):
 
         lbl_title = QLabel("📊 داشبورد عملیاتی و کنترل جریان کار صورتجلسات")
         lbl_title.setObjectName("dash_title")
-        lbl_title.setStyleSheet("font-size: 16px; font-weight: bold; color: #0f172a;")
+        lbl_title.setStyleSheet("font-size: 18px; font-weight: 800; color: #0f172a; padding: 2px 0;")
 
         lbl_sub = QLabel("پایش مهلت‌های بحرانی، پرونده‌های در جریان و ابلاغیه‌های ارسال‌شده به پیمانکاران")
-        lbl_sub.setStyleSheet("font-size: 11px; color: #64748b;")
+        lbl_sub.setStyleSheet("font-size: 11.5px; color: #64748b; padding-top: 2px;")
 
         title_block.addWidget(lbl_title)
         title_block.addWidget(lbl_sub)
@@ -173,7 +173,7 @@ class OperationsDashboard(QDialog):
         header_layout.addStretch()
 
         self.lbl_last_update = QLabel("")
-        self.lbl_last_update.setStyleSheet("font-size: 11px; color: #64748b; margin-left: 8px;")
+        self.lbl_last_update.setStyleSheet("font-size: 11px; color: #475569; background: #f1f5f9; border: 1px solid #e2e8f0; border-radius: 8px; padding: 7px 10px; margin-left: 8px;")
         header_layout.addWidget(self.lbl_last_update)
 
         # 📤 دکمه جدید: خروجی HTML برای مدیریت
@@ -195,7 +195,7 @@ class OperationsDashboard(QDialog):
 
         # ── کارت‌های شاخص‌های آماری ──
         grid = QGridLayout()
-        grid.setSpacing(10)
+        grid.setSpacing(14)
 
         metrics_def = [
             ("کل پرونده‌ها", "total", "📁", "total"),
@@ -216,7 +216,7 @@ class OperationsDashboard(QDialog):
 
         # ── ستون‌های فهرست‌های عملیاتی ──
         lists_row = QHBoxLayout()
-        lists_row.setSpacing(12)
+        lists_row.setSpacing(16)
 
         self.overdue_list = QListWidget()
         self.due_list = QListWidget()
@@ -234,9 +234,9 @@ class OperationsDashboard(QDialog):
 
         for list_widget, hdr_label, color in col_defs:
             col_box = QVBoxLayout()
-            col_box.setSpacing(6)
+            col_box.setSpacing(9)
 
-            hdr_label.setStyleSheet(f"font-weight: bold; font-size: 12px; color: {color};")
+            hdr_label.setStyleSheet(f"font-weight: 800; font-size: 12.5px; color: {color}; padding: 8px 10px; background: #ffffff; border: 1px solid #e2e8f0; border-right: 3px solid {color}; border-radius: 7px;")
             list_widget.setAlternatingRowColors(True)
             list_widget.itemDoubleClicked.connect(self._on_item_double_clicked)
 
@@ -249,7 +249,7 @@ class OperationsDashboard(QDialog):
         # ── نوار پایینی و دکمه بستن ──
         bottom_bar = QHBoxLayout()
         lbl_hint = QLabel("💡 راهنما: برای مشاهده یا ویرایش هر صورتجلسه، روی ردیف آن دوبار کلیک کنید.")
-        lbl_hint.setStyleSheet("font-size: 11px; color: #64748b;")
+        lbl_hint.setStyleSheet("font-size: 11px; color: #64748b; padding: 6px 2px;")
         bottom_bar.addWidget(lbl_hint)
         bottom_bar.addStretch()
 
@@ -265,20 +265,23 @@ class OperationsDashboard(QDialog):
     def _apply_style(self) -> None:
         self.setStyleSheet("""
             QDialog {
-                background-color: #f8fafc;
+                background-color: #f1f5f9;
+                color: #0f172a;
                 font-family: 'Vazirmatn', 'Segoe UI', Tahoma, sans-serif;
+                font-size: 12px;
             }
             QListWidget {
-                border: 1px solid #e2e8f0;
-                border-radius: 8px;
+                border: 1px solid #dbe4ee;
+                border-radius: 10px;
                 background-color: #ffffff;
-                padding: 4px;
+                padding: 7px;
                 font-size: 11.5px;
+                outline: none;
             }
             QListWidget::item {
                 border-radius: 5px;
-                padding: 7px 8px;
-                margin-bottom: 3px;
+                padding: 9px 10px;
+                margin-bottom: 4px;
                 border-bottom: 1px solid #f1f5f9;
             }
             QListWidget::item:hover {
@@ -291,8 +294,9 @@ class OperationsDashboard(QDialog):
             QPushButton {
                 background-color: #ffffff;
                 border: 1px solid #cbd5e1;
-                border-radius: 6px;
-                padding: 5px 16px;
+                border-radius: 8px;
+                padding: 7px 17px;
+                min-height: 24px;
                 font-weight: bold;
                 font-size: 12px;
                 color: #334155;
