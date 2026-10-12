@@ -47,7 +47,7 @@ except Exception:
     ROLE_CHOICES = ["admin", "editor", "viewer"]
 
 try:
-    from ui.styles import get_stylesheet
+    from ui.style import get_stylesheet
 except ImportError:
     try:
         from ui.style import get_stylesheet
