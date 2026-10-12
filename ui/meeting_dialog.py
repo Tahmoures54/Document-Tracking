@@ -1015,6 +1015,10 @@ class MeetingDialog(QDialog):
                 )
                 return
 
+            # ── هشدار شباهت (احتمال تکرار / تقلب پیمانکار) ──
+            if not self._confirm_no_duplicate_work(data):
+                return
+
             sent = data.get("sent_to_contractor_date")
             data["closing_date"] = sent
             data["contractor_response_date"] = sent
@@ -1027,7 +1031,11 @@ class MeetingDialog(QDialog):
             data["file_link"] = (
                 self.meeting.file_link if self.meeting else None
             )
-            data["entry_date"] = date.today()
+            # entry_date = ورود به کارفرما؛ فقط اگر خالی بود برای رکورد جدید پر شود
+            if self.meeting and self.meeting.entry_date:
+                data["entry_date"] = self.meeting.entry_date
+            elif not data.get("entry_date"):
+                data["entry_date"] = date.today()
             data["status"] = (
                 self.meeting.status if self.meeting else "در دست بررسی"
             )
@@ -1046,6 +1054,72 @@ class MeetingDialog(QDialog):
             QMessageBox.critical(
                 self, "خطای مهلک", f"خطای داخلی:\n{exc}"
             )
+
+    def _confirm_no_duplicate_work(self, data: Dict[str, Any]) -> bool:
+        """
+        اگر صورتجلسه مشابه (پیمانکار + محل/نقشه) یافت شد، هشدار بده.
+        کاربر می‌تواند ادامه دهد؛ در صورت ادامه، در ممیزی ثبت می‌شود.
+        """
+        try:
+            similar = self.db.find_similar_meetings(
+                contractor=data.get("contractor"),
+                location=data.get("location"),
+                drawing_number=data.get("drawing_number"),
+                subject=data.get("subject"),
+                exclude_id=self.meeting.id if self.meeting else None,
+                days_window=90,
+                limit=8,
+            )
+        except Exception as exc:
+            logger.warning("Similarity check failed: %s", exc)
+            return True
+
+        if not similar:
+            return True
+
+        lines = []
+        for m in similar:
+            loc = (m.location or "—").strip()
+            draw = (m.drawing_number or "—").strip()
+            subj = (m.subject or "—").strip()
+            if len(subj) > 40:
+                subj = subj[:40] + "…"
+            lines.append(
+                f"• {m.meeting_number} | محل: {loc} | نقشه: {draw} | {subj}"
+            )
+        detail = "\n".join(lines)
+        msg = (
+            f"⚠️ احتمال تکرار کار / صورتجلسه مشابه\n\n"
+            f"برای این پیمانکار در همین محل یا شماره نقشه، "
+            f"{len(similar)} مورد مشابه یافت شد:\n\n"
+            f"{detail}\n\n"
+            f"اگر کار واقعاً جدید است OK بزنید.\n"
+            f"در غیر این صورت Cancel و پرونده قبلی را بررسی کنید."
+        )
+        reply = QMessageBox.warning(
+            self,
+            "هشدار شباهت صورتجلسه",
+            msg,
+            QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if reply != QMessageBox.StandardButton.Ok:
+            return False
+
+        # ثبت در ممیزی که کاربر با وجود هشدار ادامه داده
+        try:
+            nums = ", ".join(m.meeting_number for m in similar[:5])
+            self.db.audit(
+                None,
+                "user",
+                "SIMILARITY_OVERRIDE",
+                f"new={data.get('meeting_number')} similar=[{nums}] "
+                f"contractor={data.get('contractor')} location={data.get('location')} "
+                f"drawing={data.get('drawing_number')}",
+            )
+        except Exception as exc:
+            logger.warning("Audit similarity override failed: %s", exc)
+        return True
 
     def get_data(self) -> Dict[str, Any]:
         return self._result_data
