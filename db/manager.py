@@ -8,6 +8,7 @@ db.manager
 from __future__ import annotations
 
 import hashlib
+import hmac
 import logging
 import os
 import sqlite3
@@ -50,14 +51,32 @@ OPEN_STATUSES = [STATUS_PENDING, STATUS_AWAITING, STATUS_RETURNED]
 # ─────────────────────────────────────────────────────────────
 # توابع کمکی امنیت و احراز هویت
 # ─────────────────────────────────────────────────────────────
+from security.passwords import (
+    hash_password as _hash_password_pbkdf2,
+    verify_password as _verify_password_pbkdf2,
+    needs_rehash,
+)
+
+
 def hash_password(password: str) -> str:
-    """هش کردن رمز عبور با استفاده از SHA-256"""
-    return hashlib.sha256(password.encode("utf-8")).hexdigest()
+    """ذخیره رمزهای جدید با PBKDF2-HMAC-SHA256 و نمک تصادفی."""
+    return _hash_password_pbkdf2(password)
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """بررسی صحت رمز عبور وارد شده با هش ذخیره شده در دیتابیس"""
-    return hash_password(plain_password) == hashed_password
+    """بررسی هش جدید PBKDF2 و پشتیبانی موقت از هش قدیمی SHA-256."""
+    if _verify_password_pbkdf2(plain_password, hashed_password):
+        return True
+    # سازگاری با دیتابیس‌های قدیمی: هش ۶۴ رقمی SHA-256 را فقط برای ورود مهاجرت می‌دهیم.
+    if (
+        isinstance(plain_password, str)
+        and isinstance(hashed_password, str)
+        and len(hashed_password) == 64
+        and all(char in "0123456789abcdef" for char in hashed_password.lower())
+    ):
+        legacy_hash = hashlib.sha256(plain_password.encode("utf-8")).hexdigest()
+        return hmac.compare_digest(legacy_hash, hashed_password.lower())
+    return False
 
 
 class DatabaseManager:
@@ -334,6 +353,10 @@ class DatabaseManager:
             if not verify_password(password, u.password_hash):
                 self.audit(u.id, u.username, "LOGIN_FAIL", "Invalid credential attempt")
                 return None
+            # مهاجرت تدریجی و بدون اجبار به ریست رمز: هش قدیمی پس از ورود موفق ارتقا می‌یابد.
+            if needs_rehash(u.password_hash):
+                u.password_hash = hash_password(password)
+                sess.commit()
             self.audit(u.id, u.username, "LOGIN_OK", "Success login")
             return u
 
