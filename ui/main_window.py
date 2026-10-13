@@ -76,6 +76,7 @@ from db.models import Meeting, DISCIPLINES, WorkflowStep
 from security.permissions import (
     PERM_DB_PUBLISH,
     PERM_REPORT_EXPORT,
+    PERM_REPORT_READ,
     PERM_REPORT_WRITE,
     PERM_USER_ADMIN,
     can,
@@ -941,6 +942,10 @@ class MainWindow(QMainWindow):
 
         bar.addWidget(QLabel("جستجوی سریع:"))
         bar.addWidget(self.search, stretch=1)
+        self.btn_workflow_report = QPushButton("⏱ گزارش زمان رسیدگی")
+        self.btn_workflow_report.setObjectName("btn_primary")
+        self.btn_workflow_report.setToolTip("گزارش HTML مدت کل رسیدگی و زمان صرف‌شده در هر مرحله")
+        bar.addWidget(self.btn_workflow_report)
         return bar
 
     def _build_status_legend(self) -> QWidget:
@@ -1022,6 +1027,7 @@ class MainWindow(QMainWindow):
         self.btn_template.clicked.connect(self.download_import_template)
         self.btn_scan.clicked.connect(self.open_scanned_document)
         self.btn_tracking.clicked.connect(self.open_tracking)
+        self.btn_workflow_report.clicked.connect(self.open_workflow_reports)
         self.btn_prev.clicked.connect(self.prev_page)
         self.btn_next.clicked.connect(self.next_page)
 
@@ -1979,6 +1985,13 @@ class MainWindow(QMainWindow):
         self._apply_live_status(m.id)
         self.reload_page()
 
+    def open_workflow_reports(self) -> None:
+        if not can(self.session, PERM_REPORT_READ):
+            QMessageBox.warning(self, "دسترسی غیرمجاز", "اجازه مشاهده گزارش‌ها را ندارید.")
+            return
+        from ui.workflow_reports_dialog import WorkflowReportsDialog
+        WorkflowReportsDialog(self.db, self.session, self).exec()
+
     def open_tracking(self) -> None:
         ids = self._selected_ids()
         if not ids:
@@ -2319,6 +2332,7 @@ class MainWindow(QMainWindow):
             else:
                 self.btn_workflow.stop_meteor()
 
+        self.btn_workflow_report.setEnabled(can(self.session, PERM_REPORT_READ))
         self.btn_refresh.setEnabled(True)
         self.btn_dashboard.setEnabled(True)
         self.btn_scan.setEnabled(True)
