@@ -1,352 +1,284 @@
 # -*- coding: utf-8 -*-
-"""
-ماژول تولید گزارش HTML گردش کار
-مسیر: services/workflow_report.py
-"""
+"""گزارش‌های HTML زمان رسیدگی و گردش کار صورتجلسات؛ بدون وابستگی به اینترنت."""
+from __future__ import annotations
+
 import os
-from html import escape as esc
+from datetime import date, datetime
+from html import escape
+from typing import Iterable, Mapping, Sequence
+
 from PyQt6.QtCore import QUrl
 from PyQt6.QtGui import QDesktopServices
-from PyQt6.QtWidgets import QMessageBox, QFileDialog
+from PyQt6.QtWidgets import QFileDialog, QMessageBox
 
 from utils.date_utils import to_shamsi, today_shamsi
 
 
+STATUS_LABELS = {
+    "pending": "در انتظار",
+    "in_progress": "در حال انجام",
+    "completed": "تکمیل شده",
+    "rejected": "عودت برای اصلاح",
+    "skipped": "رد شده",
+}
+
+
+def _as_date(value):
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    try:
+        return date.fromisoformat(str(value)[:10])
+    except (TypeError, ValueError):
+        return None
+
+
+def _date_text(value):
+    parsed = _as_date(value)
+    if not parsed:
+        return "—"
+    try:
+        return to_shamsi(parsed.isoformat()) or parsed.isoformat()
+    except Exception:
+        return parsed.isoformat()
+
+
+def _duration(start, end=None):
+    """مدت سپری‌شده به روز؛ تاریخ‌های ناقص هرگز به‌عنوان صفر روز گزارش نمی‌شوند."""
+    start_date = _as_date(start)
+    end_date = _as_date(end) if end is not None else date.today()
+    if not start_date or not end_date:
+        return None
+    return max(0, (end_date - start_date).days)
+
+
+def _duration_text(days, ongoing=False):
+    if days is None:
+        return "ثبت نشده"
+    if days == 0:
+        label = "کمتر از یک روز"
+    elif days == 1:
+        label = "۱ روز"
+    else:
+        label = f"{days:,} روز"
+    return f"{label} · در جریان" if ongoing else label
+
+
+def _meeting_start(meeting, steps):
+    started = [s.entry_date for s in steps if s.entry_date]
+    if started:
+        return min(started)
+    return getattr(meeting, "entry_date", None) or getattr(meeting, "created_at", None)
+
+
+def _meeting_end(meeting, steps):
+    dispatched = getattr(meeting, "sent_to_contractor_date", None)
+    if dispatched:
+        return dispatched
+    closing = getattr(meeting, "closing_date", None)
+    if closing:
+        return closing
+    if steps and all(s.status in ("completed", "skipped") for s in steps):
+        return next((s.exit_date for s in reversed(steps) if s.exit_date), None)
+    return None
+
+
+def _duration_cell(step):
+    start = getattr(step, "entry_date", None)
+    end = getattr(step, "exit_date", None)
+    if not start:
+        return "شروع ثبت نشده"
+    days = _duration(start, end)
+    return _duration_text(days, ongoing=not bool(end))
+
+
 class WorkflowReportGenerator:
-    """کلاس سازنده خروجی چاپی و رسمی برای گردش کار صورتجلسه"""
+    """تولید گزارش رسمی یک صورتجلسه با مدت کل و زمان هر مرحله."""
 
     def __init__(self, meeting, steps, parent_widget=None):
         self.meeting = meeting
-        self.steps = steps
+        self.steps = sorted(list(steps or []), key=lambda s: getattr(s, "step_order", 0))
         self.parent_widget = parent_widget
 
     def _generate_html(self) -> str:
-        now_str = today_shamsi()
         m = self.meeting
-        meeting_date_str = to_shamsi(m.meeting_date.isoformat()) if m.meeting_date else "—"
-
-        # تولید ردیف‌های جدول
-        steps_rows = ""
-        for idx, step in enumerate(self.steps, start=1):
-            entry = to_shamsi(step.entry_date.isoformat()) if step.entry_date else ""
-            exit_ = to_shamsi(step.exit_date.isoformat()) if step.exit_date else ""
-
-            status_map = {
-                "pending": "در انتظار",
-                "in_progress": "در حال انجام",
-                "completed": "تکمیل شده",
-                "rejected": "رد شده"
-            }
-            status_text = status_map.get(step.status, step.status)
-
-            row_class = "row-even" if idx % 2 == 0 else "row-odd"
-
-            steps_rows += f"""
-            <tr class="{row_class}">
-                <td class="center bold-num">{idx}</td>
-                <td class="step-title">
-                    {esc(step.step_name)}
-                    <span class="status-badge status-{step.status}">{status_text}</span>
-                </td>
-                <td class="center">{esc(entry)}</td>
-                <td class="center">{esc(exit_)}</td>
-                <td class="center resp-name">{esc(step.responsible_person or '—')}</td>
-                <td class="center signature-box">{esc(step.signature or '')}</td>
-                <td class="notes">{esc(step.notes or '')}</td>
-            </tr>
-            """
+        steps = self.steps
+        start = _meeting_start(m, steps)
+        end = _meeting_end(m, steps)
+        ongoing = not bool(end) and bool(start)
+        total_days = _duration(start, end)
+        status = getattr(m, "status", "نامشخص") or "نامشخص"
+        stage_rows = []
+        for idx, step in enumerate(steps, 1):
+            entry = _date_text(step.entry_date)
+            exit_date = _date_text(step.exit_date)
+            duration = _duration(step.entry_date, step.exit_date)
+            stage_ongoing = bool(step.entry_date and not step.exit_date)
+            state = STATUS_LABELS.get(step.status, step.status or "نامشخص")
+            row_class = "even" if idx % 2 == 0 else "odd"
+            stage_rows.append(
+                f'<tr class="{row_class}"><td>{idx}</td>'
+                f'<td class="stage">{escape(step.step_name or "—")}</td>'
+                f'<td><span class="badge {escape(step.status or "")}">{escape(state)}</span></td>'
+                f'<td>{escape(entry)}</td><td>{escape(exit_date)}</td>'
+                f'<td class="duration">{escape(_duration_text(duration, stage_ongoing))}</td>'
+                f'<td>{escape(step.responsible_person or "—")}</td>'
+                f'<td class="notes">{escape(step.notes or "—")}</td></tr>'
+            )
+        if not stage_rows:
+            stage_rows.append('<tr><td colspan="8">برای این صورتجلسه مرحله‌ای ثبت نشده است.</td></tr>')
 
         return f"""<!doctype html>
-<html dir="rtl" lang="fa">
-<head>
-<meta charset="utf-8">
-<title>فرم گردش کار - {esc(m.meeting_number)}</title>
+<html lang="fa" dir="rtl"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>گزارش زمان رسیدگی - {escape(str(m.meeting_number or ""))}</title>
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;700&display=swap');
-
-    @page {{ size: A5 landscape; margin: 10mm; }}
-
-    * {{ box-sizing: border-box; }}
-
-    body {{
-        font-family: 'Vazirmatn', Tahoma, Arial, sans-serif;
-        font-size: 8.5pt;
-        color: #1e293b;
-        background: #fff;
-        direction: rtl;
-        margin: 0;
-        padding: 0;
-        line-height: 1.5;
-        -webkit-print-color-adjust: exact;
-        print-color-adjust: exact;
-    }}
-
-    .document-container {{
-        width: 100%;
-        max-width: 190mm;
-        margin: 0 auto;
-        border-top: 6px solid #0f172a;
-        padding-top: 10px;
-    }}
-
-    /* سربرگ اصلی */
-    .main-header {{
-        text-align: center;
-        margin-bottom: 10px;
-    }}
-    .main-header h1 {{
-        font-size: 14pt;
-        font-weight: 700;
-        color: #0f172a;
-        margin: 0 0 3px 0;
-    }}
-    .main-header .en-title {{
-        font-family: 'Arial', sans-serif;
-        direction: ltr;
-        display: block;
-        color: #64748b;
-        font-size: 8.5pt;
-        letter-spacing: 0.8px;
-    }}
-
-    /* نوار اطلاعات ادغام‌شده (فشرده) */
-    .info-grid {{
-        display: grid;
-        grid-template-columns: repeat(6, 1fr);
-        gap: 5px;
-        margin-bottom: 10px;
-        padding: 6px;
-        background: #f8fafc;
-        border: 1.5px solid #94a3b8;
-        border-radius: 8px;
-    }}
-    .info-item {{
-        display: flex;
-        align-items: center;
-        gap: 4px;
-        background: #ffffff;
-        border: 1px solid #e2e8f0;
-        border-radius: 4px;
-        padding: 2px 6px;
-        font-size: 7.5pt;
-        min-height: 20px;
-    }}
-    .info-item .lbl {{
-        font-weight: 700;
-        color: #334155;
-        white-space: nowrap;
-        flex-shrink: 0;
-    }}
-    .info-item .en-inline {{
-        font-family: 'Arial', sans-serif;
-        font-size: 6pt;
-        color: #94a3b8;
-        margin-right: 2px;
-    }}
-    .info-item .val {{
-        font-family: 'Courier New', monospace;
-        font-weight: bold;
-        color: #0f172a;
-        flex: 1;
-        min-width: 0;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        direction: ltr;
-        text-align: center;
-    }}
-    .info-item .val.subject {{
-        direction: rtl;
-        font-family: inherit;
-        font-weight: 700;
-        font-size: 8pt;
-        white-space: normal;
-        text-align: right;
-    }}
-    .info-item .val.employer {{
-        direction: rtl;
-        font-family: inherit;
-        font-weight: normal;
-        white-space: normal;
-        text-align: right;
-    }}
-    .span-1 {{ grid-column: span 1; }}
-    .span-2 {{ grid-column: span 2; }}
-    .span-3 {{ grid-column: span 3; }}
-    .span-4 {{ grid-column: span 4; }}
-
-    /* جدول مراحل */
-    .data-table {{
-        width: 100%;
-        border-collapse: collapse;
-        table-layout: fixed;
-        border: 1.5px solid #0f172a;
-    }}
-    .data-table th,
-    .data-table td {{
-        border: 1px solid #94a3b8;
-        padding: 5px 4px;
-        vertical-align: middle;
-        word-wrap: break-word;
-        font-size: 8pt;
-    }}
-    .data-table th {{
-        background-color: #1e293b;
-        color: #ffffff;
-        text-align: center;
-        padding: 7px 4px;
-        font-size: 8pt;
-    }}
-    .data-table tr {{
-        page-break-inside: avoid;
-    }}
-    .row-even {{ background-color: #f8fafc; }}
-    .row-odd {{ background-color: #ffffff; }}
-
-    .col-id {{ width: 4%; }}
-    .col-title {{ width: 25%; }}
-    .col-date {{ width: 11%; }}
-    .col-resp {{ width: 14%; }}
-    .col-sign {{ width: 12%; }}
-    .col-notes {{ width: 23%; }}
-
-    .center {{ text-align: center; }}
-    .bold-num {{ font-weight: bold; font-size: 9pt; color: #0f172a; }}
-    .step-title {{
-        font-weight: 700;
-        color: #1e293b;
-        font-size: 8.5pt;
-        line-height: 1.6;
-    }}
-    .resp-name {{ font-weight: bold; color: #0369a1; }}
-    .signature-box {{ height: 30px; }}
-    .notes {{
-        font-size: 7.5pt;
-        text-align: justify;
-        color: #475569;
-    }}
-
-    /* نشان‌های وضعیت */
-    .status-badge {{
-        font-size: 6.5pt;
-        padding: 2px 6px;
-        border-radius: 10px;
-        font-weight: 500;
-        margin-right: 6px;
-        display: inline-block;
-    }}
-    .status-pending {{ background: #fef3c7; color: #92400e; border: 1px solid #fcd34d; }}
-    .status-in_progress {{ background: #e0f2fe; color: #1e40af; border: 1px solid #bae6fd; }}
-    .status-completed {{ background: #dcfce7; color: #166534; border: 1px solid #86efac; }}
-    .status-rejected {{ background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; }}
-
-    /* فوتر */
-    .footer {{
-        margin-top: 12px;
-        font-size: 7pt;
-        color: #64748b;
-        border-top: 1.5px solid #cbd5e1;
-        padding-top: 6px;
-        display: flex;
-        justify-content: space-between;
-        direction: rtl;
-    }}
-    .footer-right {{ text-align: right; }}
-    .footer-left {{ text-align: left; direction: rtl; }}
-</style>
-</head>
-<body>
-<div class="document-container">
-
-    <!-- سربرگ اصلی -->
-    <div class="main-header">
-        <h1>فرم پیگیری و گردش کار صورتجلسات</h1>
-        <span class="en-title">Meeting Workflow &amp; Follow-up Form</span>
-    </div>
-
-    <!-- اطلاعات ادغام‌شده (شماره، تاریخ، پیوست، موضوع، تاریخ جلسه، کارفرما/پیمانکار) -->
-    <div class="info-grid">
-        <div class="info-item span-1">
-            <span class="lbl">شماره <span class="en-inline">No.</span>:</span>
-            <span class="val">{esc(m.meeting_number)}</span>
-        </div>
-        <div class="info-item span-1">
-            <span class="lbl">تاریخ <span class="en-inline">Date</span>:</span>
-            <span class="val">{now_str}</span>
-        </div>
-        <div class="info-item span-1">
-            <span class="lbl">پیوست <span class="en-inline">Att.</span>:</span>
-            <span class="val">ندارد</span>
-        </div>
-        <div class="info-item span-3">
-            <span class="lbl">موضوع جلسه:</span>
-            <span class="val subject">{esc(m.subject)}</span>
-        </div>
-        <div class="info-item span-2">
-            <span class="lbl">تاریخ جلسه:</span>
-            <span class="val">{esc(meeting_date_str)}</span>
-        </div>
-        <div class="info-item span-4">
-            <span class="lbl">کارفرما / پیمانکار:</span>
-            <span class="val employer">{esc(m.employer or '—')} <span style="color:#cbd5e1; margin:0 4px;">|</span> {esc(m.contractor or '—')}</span>
-        </div>
-    </div>
-
-    <!-- جدول اصلی -->
-    <table class="data-table">
-        <thead>
-            <tr>
-                <th class="col-id">ردیف</th>
-                <th class="col-title">عنوان مرحله</th>
-                <th class="col-date">تاریخ ورود</th>
-                <th class="col-date">تاریخ خروج</th>
-                <th class="col-resp">مسئول پیگیری</th>
-                <th class="col-sign">امضاء</th>
-                <th class="col-notes">توضیحات و یادداشت‌ها</th>
-            </tr>
-        </thead>
-        <tbody>
-            {steps_rows}
-        </tbody>
-    </table>
-
-    <!-- فوتر -->
-    <div class="footer">
-        <div class="footer-right">سیستم یکپارچه Document & MOM Tracking System</div>
-        <div class="footer-left">تاریخ چاپ: {now_str}</div>
-    </div>
-
-</div>
-</body>
-</html>"""
+@page{{size:A4 landscape;margin:12mm}}*{{box-sizing:border-box}}
+body{{font-family:Tahoma,Arial,sans-serif;color:#172033;margin:0;background:#f3f6fb;font-size:13px;line-height:1.8}}
+main{{max-width:1400px;margin:24px auto;background:white;padding:26px;border-radius:16px;box-shadow:0 8px 28px #1e293b12;border-top:6px solid #0f9ca8}}
+header{{display:flex;justify-content:space-between;align-items:center;gap:20px;border-bottom:1px solid #e2e8f0;padding-bottom:16px}}
+h1{{font-size:23px;margin:0;color:#12354a}}.sub{{color:#64748b;font-size:12px}}
+.cards{{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:18px 0}}
+.card{{background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:12px 15px;min-width:0}}
+.card .label{{display:block;color:#64748b;font-size:11px}}.card strong{{display:block;color:#12354a;font-size:17px;overflow-wrap:anywhere}}
+.card.accent{{background:#ecfeff;border-color:#a5f3fc}}.card.warn{{background:#fff7ed;border-color:#fed7aa}}
+table{{width:100%;border-collapse:collapse;margin-top:14px}}th{{background:#17384d;color:white;font-weight:700}}
+th,td{{border:1px solid #dce5ee;padding:9px 8px;text-align:center;vertical-align:middle}}
+tr.even{{background:#f8fafc}}td.stage,td.notes{{text-align:right}}td.stage{{font-weight:bold;min-width:190px}}
+td.duration{{font-weight:bold;white-space:nowrap;color:#075985}}
+.badge{{display:inline-block;padding:2px 9px;border-radius:99px;font-size:11px;white-space:nowrap}}
+.badge.completed{{background:#dcfce7;color:#166534}}.badge.in_progress{{background:#dbeafe;color:#1d4ed8}}
+.badge.pending{{background:#fef3c7;color:#92400e}}.badge.rejected{{background:#fee2e2;color:#991b1b}}
+.footer{{display:flex;justify-content:space-between;border-top:1px solid #e2e8f0;margin-top:18px;padding-top:10px;color:#64748b;font-size:11px}}
+.actions{{text-align:left}}button{{border:0;border-radius:8px;background:#0f766e;color:white;padding:9px 14px;cursor:pointer;font:inherit}}
+@media print{{body{{background:white}}main{{margin:0;max-width:none;padding:0;border:0;box-shadow:none}}.actions{{display:none}}.cards{{break-inside:avoid}}tr{{break-inside:avoid}}}}
+@media(max-width:800px){{main{{margin:8px;padding:12px}}.cards{{grid-template-columns:repeat(2,minmax(0,1fr))}}header{{align-items:flex-start;flex-direction:column}}table{{font-size:11px}}th,td{{padding:5px}}}}
+</style></head><body><main>
+<header><div><h1>گزارش زمان رسیدگی صورتجلسه</h1>
+<div class="sub">گزارش مسیر رسیدگی از آغاز تا پایان هر مرحله</div></div>
+<div class="actions"><button onclick="window.print()">چاپ / ذخیره PDF</button></div></header>
+<section class="cards">
+<div class="card accent"><span class="label">شماره صورتجلسه</span><strong>{escape(str(m.meeting_number or "—"))}</strong></div>
+<div class="card"><span class="label">موضوع</span><strong>{escape(str(m.subject or "—"))}</strong></div>
+<div class="card"><span class="label">شروع رسیدگی</span><strong>{escape(_date_text(start))}</strong></div>
+<div class="card {'warn' if ongoing else 'accent'}"><span class="label">پایان رسیدگی / وضعیت زمان</span><strong>{escape(_date_text(end) if end else ("در جریان" if ongoing else "ثبت نشده"))}</strong></div>
+<div class="card accent"><span class="label">مدت کل سپری‌شده</span><strong>{escape(_duration_text(total_days, ongoing))}</strong></div>
+<div class="card"><span class="label">وضعیت پرونده</span><strong>{escape(str(status))}</strong></div>
+<div class="card"><span class="label">کارفرما</span><strong>{escape(str(m.employer or "—"))}</strong></div>
+<div class="card"><span class="label">پیمانکار</span><strong>{escape(str(m.contractor or "—"))}</strong></div>
+</section>
+<p>مدت هر مرحله از اختلاف تاریخ شروع و پایان محاسبه شده است. برای مرحله باز، زمان تا امروز محاسبه و با عبارت «در جریان» مشخص می‌شود. اطلاعات تاریخِ ثبت‌نشده به‌عنوان صفر روز فرض نشده است.</p>
+<table><thead><tr><th>ردیف</th><th>مرحله رسیدگی</th><th>وضعیت</th><th>تاریخ شروع</th><th>تاریخ پایان</th><th>مدت مرحله</th><th>مسئول</th><th>یادداشت / علت عودت</th></tr></thead>
+<tbody>{''.join(stage_rows)}</tbody></table>
+<div class="footer"><span>سامانه مدیریت و پیگیری صورتجلسات</span><span>تاریخ تهیه گزارش: {escape(today_shamsi())}</span></div>
+</main></body></html>"""
 
     def generate_and_open(self):
-        """تولید پوشه، ذخیره فایل HTML و باز کردن آن در مرورگر"""
+        """ذخیره و بازکردن گزارش؛ در صورت خطا مسیر جایگزین پیشنهاد می‌شود."""
         report_dir = os.path.join(os.getcwd(), "reports")
         try:
             os.makedirs(report_dir, exist_ok=True)
+            safe_num = "".join(c for c in str(self.meeting.meeting_number or "") if c.isalnum() or c in "-_.")
+            path = os.path.abspath(os.path.join(report_dir, f"Workflow_{safe_num or 'report'}.html"))
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write(self._generate_html())
         except OSError as exc:
-            if self.parent_widget:
-                QMessageBox.critical(self.parent_widget, "خطا", f"امکان ساخت پوشه reports وجود ندارد:\n{exc}")
-            return
+            if not self.parent_widget:
+                raise
+            path, _ = QFileDialog.getSaveFileName(
+                self.parent_widget, "ذخیره گزارش HTML", "Workflow_Report.html", "HTML (*.html)"
+            )
+            if not path:
+                return None
+            try:
+                with open(path, "w", encoding="utf-8") as handle:
+                    handle.write(self._generate_html())
+            except OSError as save_exc:
+                QMessageBox.critical(self.parent_widget, "خطای ذخیره گزارش", str(save_exc))
+                return None
+        opened = QDesktopServices.openUrl(QUrl.fromLocalFile(path))
+        if not opened and self.parent_widget:
+            QMessageBox.information(self.parent_widget, "گزارش ذخیره شد", f"فایل ذخیره شد اما مرورگر باز نشد:\n{path}")
+        return path
 
-        safe_num = "".join(c for c in self.meeting.meeting_number if c.isalnum() or c in "-_.")
-        default_path = os.path.abspath(os.path.join(report_dir, f"Workflow_{safe_num or 'report'}.html"))
-        html_content = self._generate_html()
 
-        try:
-            with open(default_path, "w", encoding="utf-8") as fh:
-                fh.write(html_content)
-            QDesktopServices.openUrl(QUrl.fromLocalFile(default_path))
-        except Exception:
-            if self.parent_widget:
-                path, _ = QFileDialog.getSaveFileName(
-                    self.parent_widget, "ذخیره گزارش", default_path, "HTML Files (*.html)"
-                )
-                if path:
-                    try:
-                        with open(path, "w", encoding="utf-8") as fh:
-                            fh.write(html_content)
-                        QDesktopServices.openUrl(QUrl.fromLocalFile(path))
-                    except Exception as e:
-                        QMessageBox.critical(self.parent_widget, "خطا", f"امکان ذخیره فایل نیست:\n{e}")
+class WorkflowOverviewReportGenerator:
+    """گزارش تجمیعی HTML برای مقایسه مدت رسیدگی صورتجلسات."""
+
+    def __init__(self, meetings: Sequence, steps_by_meeting: Mapping[int, Sequence], parent_widget=None):
+        self.meetings = list(meetings)
+        self.steps_by_meeting = steps_by_meeting
+        self.parent_widget = parent_widget
+
+    def _generate_html(self) -> str:
+        stage_names = []
+        for meeting in self.meetings:
+            for step in self.steps_by_meeting.get(meeting.id, []):
+                if step.step_name not in stage_names:
+                    stage_names.append(step.step_name)
+        stage_names.sort(key=lambda name: next(
+            (getattr(s, "step_order", 999) for mid in self.steps_by_meeting
+             for s in self.steps_by_meeting[mid] if s.step_name == name), 999
+        ))
+        rows = []
+        complete_count = 0
+        active_durations = []
+        for idx, meeting in enumerate(self.meetings, 1):
+            steps = sorted(self.steps_by_meeting.get(meeting.id, []), key=lambda s: s.step_order)
+            start, end = _meeting_start(meeting, steps), _meeting_end(meeting, steps)
+            ongoing = not bool(end) and bool(start)
+            total_days = _duration(start, end)
+            if end:
+                complete_count += 1
+            if total_days is not None:
+                active_durations.append(total_days)
+            cells = [
+                f"<td>{idx}</td>",
+                f"<td>{escape(str(meeting.meeting_number or '—'))}</td>",
+                f"<td class='subject'>{escape(str(meeting.subject or '—'))}</td>",
+                f"<td>{escape(_date_text(start))}</td>",
+                f"<td>{escape(_date_text(end) if end else ('در جریان' if ongoing else 'ثبت نشده'))}</td>",
+                f"<td class='duration'>{escape(_duration_text(total_days, ongoing))}</td>",
+                f"<td>{escape(str(meeting.status or '—'))}</td>",
+            ]
+            for name in stage_names:
+                step = next((s for s in steps if s.step_name == name), None)
+                cells.append(f"<td>{escape(_duration_cell(step) if step else '—')}</td>")
+            rows.append("<tr>" + "".join(cells) + "</tr>")
+        average = round(sum(active_durations) / len(active_durations), 1) if active_durations else None
+        stage_headers = "".join(f"<th>{escape(name)}</th>" for name in stage_names)
+        return f"""<!doctype html><html lang="fa" dir="rtl"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>گزارش تجمیعی زمان رسیدگی</title>
+<style>
+@page{{size:A3 landscape;margin:10mm}}*{{box-sizing:border-box}}body{{font-family:Tahoma,Arial,sans-serif;color:#172033;background:#f1f5f9;margin:0;font-size:12px;line-height:1.7}}
+main{{margin:20px auto;max-width:1800px;background:#fff;padding:24px;border-radius:14px;border-top:6px solid #0f9ca8}}
+header{{display:flex;justify-content:space-between;align-items:center;gap:16px}}h1{{margin:0;color:#12354a;font-size:22px}}.muted{{color:#64748b}}
+.cards{{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:18px 0}}.card{{padding:12px;border:1px solid #dbe5ef;background:#f8fafc;border-radius:10px}}
+.card span{{display:block;color:#64748b;font-size:11px}}.card strong{{font-size:18px;color:#12354a}}
+button{{background:#0f766e;color:white;border:0;border-radius:8px;padding:9px 14px;cursor:pointer;font:inherit}}
+.table-wrap{{overflow-x:auto}}table{{width:100%;border-collapse:collapse;margin-top:12px}}th,td{{border:1px solid #dbe4ee;padding:7px;text-align:center;vertical-align:middle;white-space:nowrap}}th{{background:#17384d;color:white}}tbody tr:nth-child(even){{background:#f8fafc}}td.subject{{text-align:right;white-space:normal;min-width:200px}}td.duration{{font-weight:bold;color:#075985}}.footer{{border-top:1px solid #e2e8f0;margin-top:16px;padding-top:8px;color:#64748b;font-size:11px}}
+@media print{{body{{background:white}}main{{margin:0;max-width:none;padding:0;border:0}}button{{display:none}}}}
+</style></head><body><main>
+<header><div><h1>گزارش تجمیعی زمان رسیدگی صورتجلسات</h1><div class="muted">مدت کل و زمان صرف‌شده در هر مرحله · گزارش تهیه‌شده در {escape(today_shamsi())}</div></div><button onclick="window.print()">چاپ / ذخیره PDF</button></header>
+<section class="cards"><div class="card"><span>تعداد صورتجلسات</span><strong>{len(self.meetings):,}</strong></div>
+<div class="card"><span>پایان‌یافته‌ها بر اساس تاریخ پایان موجود</span><strong>{complete_count:,}</strong></div>
+<div class="card"><span>میانگین مدت سپری‌شده (روز)</span><strong>{escape(str(average) if average is not None else 'داده کافی نیست')}</strong></div></section>
+<p class="muted">مدت مراحل بر اساس تاریخ‌های ثبت‌شده محاسبه می‌شود. برای مراحل آغازشده و پایان‌نیافته، مدت تا امروز و نشان «در جریان» نمایش داده می‌شود. خانه خالی به معنای نبود تاریخ شروع است، نه صفر روز.</p>
+<div class="table-wrap"><table><thead><tr><th>ردیف</th><th>شماره</th><th>موضوع</th><th>شروع رسیدگی</th><th>پایان رسیدگی</th><th>مدت کل</th><th>وضعیت پرونده</th>{stage_headers}</tr></thead><tbody>{''.join(rows) or '<tr><td colspan="7">صورتجلسه‌ای یافت نشد.</td></tr>'}</tbody></table></div>
+<div class="footer">سامانه مدیریت و پیگیری صورتجلسات — تاریخ تهیه گزارش: {escape(today_shamsi())}</div>
+</main></body></html>"""
+
+    def generate_and_open(self):
+        report_dir = os.path.join(os.getcwd(), "reports")
+        os.makedirs(report_dir, exist_ok=True)
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        path = os.path.abspath(os.path.join(report_dir, f"Workflow_Time_Overview_{stamp}.html"))
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(self._generate_html())
+        opened = QDesktopServices.openUrl(QUrl.fromLocalFile(path))
+        if not opened and self.parent_widget:
+            QMessageBox.information(self.parent_widget, "گزارش ذخیره شد", f"فایل ذخیره شد اما مرورگر باز نشد:\n{path}")
+        return path
