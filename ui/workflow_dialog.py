@@ -130,22 +130,23 @@ STEP_NAME_LABELS: Dict[str, str] = {
 }
 
 # ═══════════════════════════════════════════════
-# ایندکس ستون‌های جدول (نسخه فشرده ۶ ستونی)
+# ایندکس ستون‌های جدول؛ شروع و پایان هر رسیدگی جداگانه
 # ═══════════════════════════════════════════════
-COL_IDX = 0     # #
-COL_NAME = 1    # مرحله
-COL_STATUS = 2  # وضعیت
-COL_DATES = 3   # بازه زمانی (ورود ← خروج)
-COL_RESP = 4    # مسئول اقدام (Combo)
-COL_NOTES = 5   # یادداشت
-COL_COUNT = 6
+COL_IDX = 0
+COL_NAME = 1
+COL_STATUS = 2
+COL_ENTRY = 3
+COL_EXIT = 4
+COL_RESP = 5
+COL_NOTES = 6
+COL_COUNT = 7
 
-# عرض‌های از پیش تعیین‌شده (به پیکسل)
 COL_WIDTHS = {
-    COL_IDX: 38,
-    COL_STATUS: 110,
-    COL_DATES: 175,
-    COL_RESP: 140,
+    COL_IDX: 42,
+    COL_STATUS: 132,
+    COL_ENTRY: 118,
+    COL_EXIT: 118,
+    COL_RESP: 155,
 }
 
 # طول پیش‌نمایش متن‌های بلند
@@ -168,97 +169,59 @@ def _status_icon(status: str) -> str:
 # ═══════════════════════════════════════════════
 _DIALOG_STYLESHEET = """
     QDialog {
-        background-color: #f1f5f9;
+        background-color: #f4f7fb;
+        color: #172033;
         font-family: 'Vazirmatn', 'Tahoma', Arial, sans-serif;
+        font-size: 10pt;
     }
-
-    /* ── نوار اطلاعات ── */
     QFrame#info_bar {
-        background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-            stop:0 #0f172a, stop:0.5 #1e293b, stop:1 #334155);
-        border-radius: 12px;
+        background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+            stop:0 #10243a, stop:1 #1d4960);
+        border: 1px solid #294b63;
+        border-radius: 14px;
     }
     QFrame#info_chip {
-        background: rgba(255,255,255,0.06);
-        border: 1px solid rgba(255,255,255,0.10);
-        border-radius: 8px;
+        background: rgba(255,255,255,0.08);
+        border: 1px solid rgba(255,255,255,0.13);
+        border-radius: 10px;
     }
-    QFrame#info_chip:hover {
-        background: rgba(255,255,255,0.10);
-    }
+    QFrame#info_chip:hover { background: rgba(255,255,255,0.13); }
     QFrame#info_bar QLabel#chip_label {
-        color: #94a3b8;
-        font-size: 10px;
-        font-weight: bold;
-        background: transparent;
+        color: #b8cede; font-size: 9pt; font-weight: bold; background: transparent;
     }
     QFrame#info_bar QLabel#chip_value {
-        color: #f1f5f9;
-        font-size: 12.5px;
-        font-weight: bold;
-        background: transparent;
+        color: #ffffff; font-size: 10.5pt; font-weight: bold; background: transparent;
     }
-
-    /* ── نوار پیشرفت ── */
     QProgressBar {
-        border: none;
-        border-radius: 8px;
-        background: #e2e8f0;
-        text-align: center;
-        color: #0f172a;
-        font-weight: bold;
-        font-size: 11px;
-        min-height: 22px;
-        max-height: 22px;
+        border: 1px solid #d5dfeb; border-radius: 9px;
+        background: #e5edf5; text-align: center; color: #24364b;
+        font-weight: bold; min-height: 24px; max-height: 24px;
     }
     QProgressBar::chunk {
         background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-            stop:0 #3b82f6, stop:1 #10b981);
+            stop:0 #2583d8, stop:1 #12a887);
         border-radius: 8px;
     }
-
-    /* ── جدول ── */
     QTableWidget {
-        background: #ffffff;
-        border: 1px solid #e2e8f0;
-        border-radius: 10px;
-        gridline-color: #f1f5f9;
-        alternate-background-color: #f8fafc;
-        selection-background-color: #dbeafe;
-        selection-color: #1e40af;
-        outline: none;
-        font-size: 12px;
+        background: #ffffff; alternate-background-color: #f5f8fc;
+        border: 1px solid #dbe4ef; border-radius: 12px;
+        gridline-color: #edf2f7; selection-background-color: #dceeff;
+        selection-color: #123c66; outline: none;
     }
-    QTableWidget::item {
-        padding: 8px 6px;
-        border: none;
-    }
-    QTableWidget::item:selected {
-        background-color: #dbeafe;
-        color: #1e40af;
-    }
-
+    QTableWidget::item { padding: 9px 7px; border: none; }
+    QTableWidget::item:selected { background: #dceeff; color: #123c66; }
     QHeaderView::section {
-        background-color: #1e293b;
-        color: #ffffff;
-        padding: 10px 8px;
-        border: none;
-        border-left: 1px solid #334155;
-        font-weight: bold;
-        font-size: 11.5px;
+        background: #20384f; color: #ffffff; padding: 11px 8px;
+        border: none; border-left: 1px solid #34516b;
+        font-weight: bold; font-size: 10pt;
     }
-    QHeaderView::section:first {
-        border-right: 1px solid #334155;
-    }
-
-    /* ── نوار وضعیت ── */
     QLabel#status_label {
-        background: #ffffff;
-        border: 1px solid #cbd5e1;
-        border-radius: 8px;
-        padding: 8px 14px;
-        font-size: 12px;
-        font-weight: bold;
+        background: #ffffff; border: 1px solid #d6e1ed;
+        border-radius: 10px; padding: 9px 14px;
+        font-size: 10pt; font-weight: bold; color: #31445a;
+    }
+    QPushButton {
+        font-size: 9.5pt;
     }
 """
 
@@ -767,11 +730,12 @@ class WorkflowDialog(QDialog):
         self.table = QTableWidget()
         self.table.setColumnCount(COL_COUNT)
         self.table.setHorizontalHeaderLabels([
-            "#",
-            "مرحله / اقدام مورد انتظار",
+            "ردیف",
+            "مرحله رسیدگی",
             "وضعیت",
-            "بازه زمانی (ورود ← خروج)",
-            "مسئول اقدام",
+            "تاریخ شروع",
+            "تاریخ پایان",
+            "مسئول رسیدگی",
             "یادداشت / علت عودت",
         ])
         self.table.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
@@ -790,11 +754,11 @@ class WorkflowDialog(QDialog):
             self.table.setColumnWidth(col, COL_WIDTHS[col])
 
         # حداقل عرض برای ستون‌های Stretch
-        self.table.setColumnWidth(COL_NAME, 240)
-        self.table.setColumnWidth(COL_NOTES, 160)
+        self.table.setColumnWidth(COL_NAME, 250)
+        self.table.setColumnWidth(COL_NOTES, 190)
 
         self.table.verticalHeader().setVisible(False)
-        self.table.verticalHeader().setDefaultSectionSize(42)
+        self.table.verticalHeader().setDefaultSectionSize(50)
         self.table.setAlternatingRowColors(True)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.setSelectionBehavior(
@@ -1099,29 +1063,27 @@ class WorkflowDialog(QDialog):
         )
         self.table.setItem(row, COL_STATUS, status_item)
 
-        # ── ستون بازه زمانی (راست‌چین) ──
-        entry = (
-            to_shamsi(step.entry_date.isoformat()) if step.entry_date else None
-        )
-        exit_ = (
-            to_shamsi(step.exit_date.isoformat()) if step.exit_date else None
-        )
-        if entry and exit_:
-            period = f"{entry}  ←  {exit_}"
-        elif entry:
-            period = f"ورود: {entry}"
-        elif exit_:
-            period = f"خروج: {exit_}"
-        else:
-            period = "—"
-        period_item = self._make_item(
-            period,
-            align=Qt.AlignmentFlag.AlignRight,
+        # ── تاریخ آغاز رسیدگی ──
+        entry = to_shamsi(step.entry_date.isoformat()) if step.entry_date else "هنوز شروع نشده"
+        entry_item = self._make_item(
+            f"▶  {entry}" if step.entry_date else "—",
+            align=Qt.AlignmentFlag.AlignCenter,
             bg=bg, fg=fg,
         )
-        self.table.setItem(row, COL_DATES, period_item)
+        entry_item.setToolTip("تاریخ ثبت شروع رسیدگی")
+        self.table.setItem(row, COL_ENTRY, entry_item)
 
-        # ── ستون مسئول (Combo) ──
+        # ── تاریخ پایان رسیدگی ──
+        exit_ = to_shamsi(step.exit_date.isoformat()) if step.exit_date else "در انتظار پایان"
+        exit_item = self._make_item(
+            f"✓  {exit_}" if step.exit_date else "—",
+            align=Qt.AlignmentFlag.AlignCenter,
+            bg=bg, fg=fg,
+        )
+        exit_item.setToolTip("تاریخ ثبت پایان رسیدگی")
+        self.table.setItem(row, COL_EXIT, exit_item)
+
+        # ── مسئول رسیدگی (Combo) ──
         self.table.setCellWidget(row, COL_RESP, self._make_resp_combo(step))
 
         # ── ستون یادداشت (راست‌چین، با truncate) ──
