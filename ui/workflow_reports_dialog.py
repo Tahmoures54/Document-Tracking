@@ -23,6 +23,7 @@ class WorkflowReportsDialog(QDialog):
         self.db = db
         self.session = session
         self.meetings = []
+        self.steps_by_meeting = {}
         self.setWindowTitle("گزارش زمان رسیدگی صورتجلسات")
         self.resize(1120, 680)
         self.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
@@ -95,15 +96,15 @@ class WorkflowReportsDialog(QDialog):
 
     @staticmethod
     def _elapsed_text(meeting, steps):
-        from datetime import date
+        from datetime import date, datetime
         start_candidates = [s.entry_date for s in steps if s.entry_date]
         start = min(start_candidates) if start_candidates else (meeting.entry_date or meeting.created_at)
         if not start:
             return "شروع ثبت نشده"
-        if hasattr(start, "date") and not isinstance(start, date):
+        if isinstance(start, datetime):
             start = start.date()
         end = meeting.sent_to_contractor_date or meeting.closing_date
-        if end and hasattr(end, "date") and not isinstance(end, date):
+        if isinstance(end, datetime):
             end = end.date()
         end = end or date.today()
         days = max(0, (end - start).days)
@@ -126,6 +127,10 @@ class WorkflowReportsDialog(QDialog):
                 if not rows or offset >= total:
                     break
             self.meetings = all_meetings
+            self.steps_by_meeting = {
+                meeting.id: self.db.get_workflow_steps(meeting.id)
+                for meeting in self.meetings
+            }
             self._render_rows()
         except Exception as exc:
             logger.exception("Could not load workflow reports")
@@ -153,7 +158,7 @@ class WorkflowReportsDialog(QDialog):
         self.table.setRowCount(len(rows))
         for row, meeting in enumerate(rows):
             try:
-                steps = self.db.get_workflow_steps(meeting.id)
+                steps = self.steps_by_meeting.get(meeting.id, [])
                 duration = self._elapsed_text(meeting, steps)
             except Exception:
                 logger.exception("Could not calculate meeting duration: %s", meeting.id)
@@ -198,12 +203,8 @@ class WorkflowReportsDialog(QDialog):
 
     def open_overview_report(self):
         try:
-            steps_by_meeting = {
-                meeting.id: self.db.get_workflow_steps(meeting.id)
-                for meeting in self.meetings
-            }
             path = WorkflowOverviewReportGenerator(
-                self.meetings, steps_by_meeting, self
+                self.meetings, self.steps_by_meeting, self
             ).generate_and_open()
             if path:
                 QMessageBox.information(self, "گزارش آماده است", f"گزارش تجمیعی HTML ساخته شد و در مرورگر باز شد.\n\n{path}")
