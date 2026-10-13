@@ -9,6 +9,7 @@ from PyQt6.QtWidgets import (
     QMessageBox, QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout,
 )
 
+from db.models import WorkflowStep
 from security.permissions import PERM_REPORT_READ, can
 from services.workflow_report import WorkflowOverviewReportGenerator, WorkflowReportGenerator
 
@@ -127,10 +128,22 @@ class WorkflowReportsDialog(QDialog):
                 if not rows or offset >= total:
                     break
             self.meetings = all_meetings
-            self.steps_by_meeting = {
-                meeting.id: self.db.get_workflow_steps(meeting.id)
-                for meeting in self.meetings
-            }
+            self.steps_by_meeting = {meeting.id: [] for meeting in self.meetings}
+            meeting_ids = list(self.steps_by_meeting)
+            # خواندن دسته‌ای مراحل، به‌جای اجرای یک کوئری جداگانه برای هر صورتجلسه
+            for offset in range(0, len(meeting_ids), 500):
+                batch_ids = meeting_ids[offset:offset + 500]
+                if not batch_ids:
+                    continue
+                with self.db.session() as sess:
+                    stages = (
+                        sess.query(WorkflowStep)
+                        .filter(WorkflowStep.meeting_id.in_(batch_ids))
+                        .order_by(WorkflowStep.meeting_id, WorkflowStep.step_order)
+                        .all()
+                    )
+                    for stage in stages:
+                        self.steps_by_meeting.setdefault(stage.meeting_id, []).append(stage)
             self._render_rows()
         except Exception as exc:
             logger.exception("Could not load workflow reports")
