@@ -372,18 +372,29 @@ class _Toast(QFrame):
             cb()
 
     def _fade_out(self) -> None:
+        """Fade out the toast safely, even if Qt has already destroyed its animation."""
         self._undo_callback = None
-        self._anim.stop()
-        self._anim.setStartValue(self._opacity.opacity())
-        self._anim.setEndValue(0.0)
-        self._anim.finished.connect(self._on_hidden)
-        self._anim.start()
+        try:
+            animation = self._anim
+            opacity = self._opacity
+            # A toast can be destroyed while its single-shot timer is queued.
+            # Qt then invalidates the wrapped C++ animation object; never let that
+            # callback raise through the Qt event loop and terminate the application.
+            animation.stop()
+            animation.finished.disconnect(self._on_hidden)
+            animation.setStartValue(opacity.opacity())
+            animation.setEndValue(0.0)
+            animation.finished.connect(self._on_hidden)
+            animation.start()
+        except (RuntimeError, TypeError):
+            logger.debug("Toast fade-out skipped because its Qt objects were deleted")
 
     def _on_hidden(self) -> None:
-        self.hide()
         try:
+            self.hide()
             self._anim.finished.disconnect(self._on_hidden)
-        except TypeError:
+        except (RuntimeError, TypeError):
+            # The parent dialog/application may already have destroyed the toast.
             pass
 
     def _reposition(self) -> None:
