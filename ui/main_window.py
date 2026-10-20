@@ -28,6 +28,9 @@ from PyQt6.QtCore import (
     QRectF,
     QSettings,
     QThreadPool,
+    QRunnable,
+    QObject,
+    pyqtSignal,
     QTimer,
     QUrl,
     QEasingCurve,
@@ -94,6 +97,52 @@ def _has_matplotlib() -> bool:
         return bool(HAS_MATPLOTLIB)
     except Exception:
         return False
+
+
+def _build_scan_index(root: str) -> Tuple[Dict[str, List[str]], bool]:
+    """Build a case-insensitive index of scan files without blocking the UI."""
+    if not root or not os.path.isdir(root):
+        return {}, False
+    index: Dict[str, List[str]] = {}
+    errors: List[OSError] = []
+    def _on_walk_error(exc: OSError) -> None:
+        errors.append(exc)
+    try:
+        for current_root, _dirs, files in os.walk(root, onerror=_on_walk_error):
+            for name in files:
+                stem, ext = os.path.splitext(name)
+                if SCAN_FILE_EXTENSIONS and ext.casefold() not in SCAN_FILE_EXTENSIONS:
+                    continue
+                key = stem.strip().casefold()
+                if key:
+                    index.setdefault(key, []).append(os.path.join(current_root, name))
+    except OSError as exc:
+        logger.warning("Could not index scan folder %s: %s", root, exc)
+        return {}, False
+    if errors:
+        logger.warning("Some scan folders could not be read under %s", root)
+        return {}, False
+    for paths in index.values():
+        paths.sort(key=lambda p: (
+            os.path.splitext(p)[1].casefold() != ".pdf", len(p), p.casefold()
+        ))
+    return index, True
+
+
+class _ScanIndexSignals(QObject):
+    finished = pyqtSignal(object, bool)
+
+
+class _ScanIndexWorker(QRunnable):
+    """Index scan files in the background so the UI stays responsive."""
+    def __init__(self, root: str) -> None:
+        super().__init__()
+        self.root = root
+        self.signals = _ScanIndexSignals()
+
+    def run(self) -> None:
+        index, available = _build_scan_index(self.root)
+        self.signals.finished.emit(index, available)
 
 
 # ─────────────────────────────────────────────
@@ -325,7 +374,10 @@ class MeetingsPageModel(QAbstractTableModel):
     def __init__(self) -> None:
         super().__init__()
         self._orig_headers: List[str] = Meeting.headers()
-        self.headers: List[str] = ["#"] + self._orig_headers + ["کارشناس رسیدگی‌کننده", "مرحله جاری"]
+        self.headers: List[str] = (
+            ["#"] + self._orig_headers
+            + ["وضعیت اسکن", "کارشناس رسیدگی‌کننده", "مرحله جاری"]
+        )
         self.rows: List[List[Any]] = []
         # وضعیت واقعی گردش‌کار، جدا از وضعیت عمومی پرونده نگهداری می‌شود.
         # کلیدها شناسه پرونده‌اند تا هیچ ستون داخلی به جدول نمایشی اضافه نشود.
@@ -338,8 +390,9 @@ class MeetingsPageModel(QAbstractTableModel):
         self._col_drawing_number = self._find("شماره نقشه")
         self._col_contract_number = self._find("شماره قرارداد")
 
-        self._col_responsible = len(self._orig_headers)
-        self._col_stage = len(self._orig_headers) + 1
+        self._col_scan_status = len(self._orig_headers)
+        self._col_responsible = len(self._orig_headers) + 1
+        self._col_stage = len(self._orig_headers) + 2
 
     def _find(self, name: str) -> int:
         try:
@@ -380,6 +433,8 @@ class MeetingsPageModel(QAbstractTableModel):
     def _display_value(self, row: int, col: int) -> str:
         if col == 0:
             return str(row + 1)
+        if col == self._col_scan_status + 1:
+            return str(self._cell(row, self._col_scan_status) or "در حال بررسی…")
         if col == self._col_responsible + 1:
             val = self._cell(row, self._col_responsible)
             if val == "admin":
@@ -423,6 +478,17 @@ class MeetingsPageModel(QAbstractTableModel):
 
     def _color(self, row: int, role: int) -> Optional[QBrush]:
         is_bg = role == Qt.ItemDataRole.BackgroundRole
+
+        if role == Qt.ItemDataRole.ForegroundRole and self._col_scan_status >= 0:
+            scan_status = str(self._cell(row, self._col_scan_status) or "")
+            scan_colors = {
+                "فایل موجود است": "#15803D",
+                "فایل موجود نیست": "#B91C1C",
+                "پوشه در دسترس نیست": "#B45309",
+                "در حال بررسی…": "#64748B",
+            }
+            if scan_status in scan_colors:
+                return QBrush(QColor(scan_colors[scan_status]))
 
         # ۱. رنگ ردیف از وضعیت واقعی گام‌ها (اولویت اول)
         meeting_id = self.get_row_id(row)
@@ -531,6 +597,10 @@ class MainWindow(QMainWindow):
         self.dark_mode: bool = False
         self._columns_initialized: bool = False
         self._import_progress: Optional[QProgressDialog] = None
+        self._scan_index: Dict[str, List[str]] = {}
+        self._scan_index_available: Optional[bool] = None
+        self._scan_scan_in_progress = False
+        self._scan_worker: Optional[_ScanIndexWorker] = None
 
         self.page: int = 0
         self.page_size: int = DEFAULT_PAGE_SIZE
@@ -556,6 +626,7 @@ class MainWindow(QMainWindow):
         self.reload_page()
         self._update_title()
         self._apply_style()
+        self.refresh_scan_index()
 
         QTimer.singleShot(self.ALERT_DELAY_MS, self._show_operational_alerts)
 
@@ -1140,6 +1211,7 @@ class MainWindow(QMainWindow):
         ms.addAction(self._act("باز کردن پوشه اسکن", self.open_scan_folder))
         ms.addSeparator()
         ms.addAction(self._act("بررسی مسیر اسکن", self.check_scan_path))
+        ms.addAction(self._act("به‌روزرسانی وضعیت فایل‌های اسکن", self.refresh_scan_index))
 
         # منوی راهنما
         mh = mb.addMenu("راهنما")
@@ -1674,6 +1746,7 @@ class MainWindow(QMainWindow):
                 row[status_index] = live_status
 
             responsible, stage = self._resolve_workflow_step_from_list(m, m_steps)
+            row.append(self._scan_status_for(m.meeting_number))
             row.append(responsible or "—")
             row.append(stage or "—")
             result.append(row)
@@ -1838,13 +1911,54 @@ class MainWindow(QMainWindow):
             self.lbl_scan.setStyleSheet(
                 "background:transparent;color:#16a34a;font-weight:bold;"
             )
-            self.lbl_scan.setToolTip(f"مسیر اسکن در دسترس است:\n{path}")
+            progress = "در حال نمایه‌سازی فایل‌ها…" if self._scan_scan_in_progress else (
+                f"{len(self._scan_index)} شمارهٔ فایل اسکن شناسایی شد"
+                if self._scan_index_available else "وضعیت فایل‌های اسکن هنوز بررسی نشده است"
+            )
+            self.lbl_scan.setToolTip(f"مسیر اسکن در دسترس است:\n{path}\n{progress}")
         else:
             self.lbl_scan.setText("اسکن: قطع ✕")
             self.lbl_scan.setStyleSheet(
                 "background:transparent;color:#dc2626;font-weight:bold;"
             )
             self.lbl_scan.setToolTip(f"مسیر اسکن در دسترس نیست:\n{path}")
+
+    def _scan_status_for(self, number: Any) -> str:
+        if self._scan_index_available is False:
+            return "پوشه در دسترس نیست"
+        if self._scan_index_available is not True:
+            return "در حال بررسی…"
+        key = str(number or "").strip().casefold()
+        return "فایل موجود است" if key and key in self._scan_index else "فایل موجود نیست"
+
+    def refresh_scan_index(self) -> None:
+        """Refresh the scan-file index asynchronously."""
+        if self._scan_scan_in_progress:
+            self.statusBar().showMessage("بررسی فایل‌های اسکن در حال انجام است…", 3000)
+            return
+        self._scan_scan_in_progress = True
+        self._scan_index_available = None
+        self._refresh_scan_status()
+        worker = _ScanIndexWorker(self._scan_path())
+        worker.signals.finished.connect(self._on_scan_index_ready)
+        self._scan_worker = worker
+        self.thread_pool.start(worker)
+
+    def _on_scan_index_ready(self, index: object, available: bool) -> None:
+        self._scan_index = index if isinstance(index, dict) else {}
+        self._scan_index_available = bool(available)
+        self._scan_scan_in_progress = False
+        self._scan_worker = None
+        self._refresh_scan_status()
+        self.reload_page()
+        if available:
+            self.statusBar().showMessage(
+                f"بررسی اسکن‌ها تمام شد؛ {len(self._scan_index)} شمارهٔ فایل شناسایی شد.", 5000
+            )
+        else:
+            self.statusBar().showMessage(
+                "پوشهٔ اسکن در دسترس نیست یا امکان خواندن کامل آن وجود ندارد.", 6000
+            )
 
     def _scan_path(self) -> str:
         path = str(
