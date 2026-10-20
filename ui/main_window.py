@@ -1977,7 +1977,8 @@ class MainWindow(QMainWindow):
         if not path:
             return
         self.settings.setValue("scan_path", os.path.normpath(path))
-        self._refresh_scan_status()
+        # Rebuild the index immediately so row statuses cannot reflect the old folder.
+        self.refresh_scan_index()
         QMessageBox.information(
             self, "تنظیمات اسکن",
             f"مسیر اسکن با موفقیت ذخیره شد:\n{os.path.normpath(path)}"
