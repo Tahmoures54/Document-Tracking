@@ -2,11 +2,12 @@
 """
 ui.workflow_dialog
 ماژول هوشمند مدیریت گردش کار صورتجلسه و مانیتورینگ پیشرفت کار تیمی
-نسخه ۴.۰ — بازطراحی کامل رابط کاربری:
-    • سربرگ فشرده به‌صورت نوار کارت اطلاعاتی افقی (راست‌چین)
-    • جدول با ۶ ستون (ادغام تاریخ‌ها و حذف ستون امضای مستقل)
-    • ترازبندی صحیح RTL در تمام سلول‌ها
-    • کنتراست بهتر و خوانایی بالاتر
+نسخه ۴.۲ — فشرده‌سازی ارتفاع سطرها + راست‌چین کردن سربرگ ستون مرحله:
+    • ارتفاع پایه سطر از ۵۰px به ۳۴px کاهش یافت
+    • resizeRowsToContents حذف شد (ارتفاع یکنواخت)
+    • padding سلول‌ها از 9px به 3px کاهش یافت
+    • ارتفاع کمبوباکس مسئول از 24px به 20px کاهش یافت
+    • سربرگ ستون «مرحله رسیدگی» راست‌چین شد (هم‌راستا با محتوا)
     • حفظ کامل API عمومی و منطق گردش کار
 """
 from __future__ import annotations
@@ -153,6 +154,10 @@ COL_WIDTHS = {
 SUBJECT_PREVIEW_LENGTH = 55
 NOTES_PREVIEW_LENGTH = 70
 
+# ── تنظیمات ارتفاع سطرها (برای تنظیم دقیق‌تر فقط اینجا را تغییر دهید) ──
+TABLE_DEFAULT_ROW_HEIGHT = 34
+TABLE_MIN_ROW_HEIGHT = 30
+
 
 def _status_label(status: str) -> str:
     info = STEP_STATUS_INFO.get(status)
@@ -208,7 +213,7 @@ _DIALOG_STYLESHEET = """
         gridline-color: #edf2f7; selection-background-color: #dceeff;
         selection-color: #123c66; outline: none;
     }
-    QTableWidget::item { padding: 9px 7px; border: none; }
+    QTableWidget::item { padding: 3px 6px; border: none; }
     QTableWidget::item:selected { background: #dceeff; color: #123c66; }
     QHeaderView::section {
         background: #20384f; color: #ffffff; padding: 11px 8px;
@@ -597,6 +602,8 @@ class WorkflowDialog(QDialog):
       • نوار اطلاعات فشرده افقی
       • جدول ۶ ستونی راست‌چین
       • دکمه‌های گروه‌بندی‌شده
+      • ارتفاع سطرها بهینه و فشرده (نسخه ۴.۱)
+      • سربرگ ستون مرحله راست‌چین (نسخه ۴.۲)
     """
 
     def __init__(
@@ -740,6 +747,13 @@ class WorkflowDialog(QDialog):
         ])
         self.table.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
 
+        # ── راست‌چین کردن سربرگ ستون «مرحله رسیدگی» هم‌راستا با محتوای سلول ──
+        name_header_item = self.table.horizontalHeaderItem(COL_NAME)
+        if name_header_item is not None:
+            name_header_item.setTextAlignment(
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+            )
+
         hdr = self.table.horizontalHeader()
         hdr.setFont(get_font(QFont.Weight.Bold, -1))
         hdr.setFixedHeight(38)
@@ -758,7 +772,10 @@ class WorkflowDialog(QDialog):
         self.table.setColumnWidth(COL_NOTES, 190)
 
         self.table.verticalHeader().setVisible(False)
-        self.table.verticalHeader().setDefaultSectionSize(50)
+        # ── ارتفاع فشرده سطرها ──
+        self.table.verticalHeader().setDefaultSectionSize(TABLE_DEFAULT_ROW_HEIGHT)
+        self.table.verticalHeader().setMinimumSectionSize(TABLE_MIN_ROW_HEIGHT)
+
         self.table.setAlternatingRowColors(True)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.setSelectionBehavior(
@@ -1002,7 +1019,8 @@ class WorkflowDialog(QDialog):
         self.table.setRowCount(len(self.steps))
         for i, step in enumerate(self.steps):
             self._set_row(i, step)
-        self.table.resizeRowsToContents()
+        # ── نکته: resizeRowsToContents حذف شد تا ارتفاع سطرها یکنواخت بماند ──
+        # ارتفاع پایه از TABLE_DEFAULT_ROW_HEIGHT استفاده می‌کند.
 
     @staticmethod
     def _step_label(step: WorkflowStep) -> str:
@@ -1111,8 +1129,8 @@ class WorkflowDialog(QDialog):
                 border: 1px solid #cbd5e1;
                 border-radius: 6px;
                 background: #ffffff;
-                padding: 3px 8px;
-                min-height: 24px;
+                padding: 1px 6px;
+                min-height: 20px;
                 color: #0f172a;
             }
             QComboBox:hover { border-color: #94a3b8; }
