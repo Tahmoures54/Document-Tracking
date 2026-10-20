@@ -774,7 +774,7 @@ class MeetingDialog(QDialog):
         if not can_overwrite:
             return
 
-        # با blockSignals از بازگشت مجدد _on_meeting_date_changed جلوگیری می‌کنیم
+        # با blockSignals از بازگشت مجدد _on_entry_date_changed جلوگیری می‌کنیم
         due_widget.blockSignals(True)
         try:
             due_widget.setText(suggested_due)
