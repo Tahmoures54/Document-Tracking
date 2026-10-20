@@ -66,13 +66,15 @@ REQUIRED_FIELDS: Dict[str, str] = {
     "meeting_number": "شماره صورتجلسه",
     "subject": "موضوع",
     "meeting_date": "تاریخ صورتجلسه",
-    "due_date": "مهلت انجام",
+    "entry_date": "تاریخ ورود به کارفرما",
+    "due_date": "مهلت رسیدگی",
 }
 
 PROGRESS_FIELDS: Dict[str, int] = {
     "meeting_number": 2,
     "subject": 2,
     "meeting_date": 2,
+    "entry_date": 2,
     "due_date": 2,
     "employer": 1,
     "consultant": 1,
@@ -91,6 +93,7 @@ PROGRESS_FIELDS: Dict[str, int] = {
 
 DATE_FIELDS: List[str] = [
     "meeting_date",
+    "entry_date",
     "contract_date",
     "sent_to_supervision_date",
     "supervision_entry_date",
@@ -375,11 +378,14 @@ class MeetingDialog(QDialog):
             if meeting:
                 self._load_meeting()
             else:
+                self._set_field_value("entry_date", today_shamsi())
                 self._set_field_value("priority", DEFAULT_PRIORITY)
         finally:
             self._is_loading = False
 
         self._connect_signals()
+        if meeting is None:
+            self._on_entry_date_changed()
         self._setup_shortcuts()
         self._install_live_validators()
 
@@ -490,6 +496,7 @@ class MeetingDialog(QDialog):
 
         # ── تاریخ‌ها ──
         self._add_date_row("meeting_date", "تاریخ صورتجلسه", required=True)
+        self._add_date_row("entry_date", "تاریخ ورود به کارفرما", required=True)
         self._add_date_row("contract_date", "تاریخ قرارداد")
         self._add_date_row("sent_to_supervision_date", "ارسال به نظارت")
         self._add_date_row("supervision_entry_date", "ورود به دفتر نظارت")
@@ -656,10 +663,10 @@ class MeetingDialog(QDialog):
             elif isinstance(widget, QSpinBox):
                 widget.valueChanged.connect(self._schedule_progress_update)
 
-        # پیشنهاد هوشمند مهلت انجام
-        m_date_widget = self._fields.get("meeting_date")
-        if isinstance(m_date_widget, QLineEdit):
-            m_date_widget.textChanged.connect(self._on_meeting_date_changed)
+        # پیشنهاد هوشمند مهلت رسیدگی بر اساس تاریخ ورود به کارفرما
+        entry_date_widget = self._fields.get("entry_date")
+        if isinstance(entry_date_widget, QLineEdit):
+            entry_date_widget.textChanged.connect(self._on_entry_date_changed)
 
         # ردیابی ویرایش دستی due_date — فقط از طریق textEdited (نه setText برنامه‌ای)
         due_widget = self._fields.get("due_date")
@@ -732,25 +739,23 @@ class MeetingDialog(QDialog):
         """فقط با ویرایش دستی کاربر فعال می‌شود (نه setText برنامه‌ای)."""
         self._due_date_dirty = True
 
-    def _on_meeting_date_changed(self) -> None:
+    def _on_entry_date_changed(self) -> None:
         """
-        اگر تاریخ صورتجلسه معتبر شد، مهلت انجام را ۳ روز بعد پیشنهاد بده —
-        اما فقط اگر:
-          ۱) کاربر مهلت را دستی ویرایش نکرده باشد، یا
-          ۲) مقدار فعلی همان پیشنهاد خودکار قبلی باشد.
+        تاریخ ورود به کارفرما مبنای پیشنهاد مهلت رسیدگی است (۳ روز تقویمی بعد).
+        مهلت دستی کاربر هرگز با پیشنهاد خودکار بازنویسی نمی‌شود.
         """
         if self._is_loading:
             return
 
-        m_date_widget = self._fields.get("meeting_date")
-        if not isinstance(m_date_widget, QLineEdit):
+        entry_date_widget = self._fields.get("entry_date")
+        if not isinstance(entry_date_widget, QLineEdit):
             return
-        m_date_str = m_date_widget.text().strip()
+        entry_date_str = entry_date_widget.text().strip()
 
-        if not _is_valid_shamsi(m_date_str):
+        if not _is_valid_shamsi(entry_date_str):
             return
 
-        suggested_due = self._add_days_to_shamsi(m_date_str, AUTO_FILL_DUE_DAYS)
+        suggested_due = self._add_days_to_shamsi(entry_date_str, AUTO_FILL_DUE_DAYS)
         if not suggested_due:
             return
 
@@ -894,7 +899,10 @@ class MeetingDialog(QDialog):
         }
         for key in DATE_FIELDS:
             raw = getattr(m, key, None)
-            text_values[key] = to_shamsi(raw.isoformat()) if raw else ""
+            if key == "entry_date" and not raw:
+                text_values[key] = today_shamsi()
+            else:
+                text_values[key] = to_shamsi(raw.isoformat()) if raw else ""
 
         for key, val in text_values.items():
             self._set_field_value(key, val)
@@ -1042,6 +1050,7 @@ class MeetingDialog(QDialog):
     def _validate_dates(self, data: Dict[str, Any]) -> Optional[str]:
         labels = {
             "meeting_date": "تاریخ صورتجلسه",
+            "entry_date": "تاریخ ورود به کارفرما",
             "contract_date": "تاریخ قرارداد",
             "sent_to_contractor_date": "تاریخ ارسال به پیمانکار",
             "due_date": "مهلت انجام",
@@ -1072,10 +1081,11 @@ class MeetingDialog(QDialog):
 
     def _validate_date_logic(self, data: Dict[str, Any]) -> Optional[str]:
         md = data.get("meeting_date")
+        entry = data.get("entry_date") or md
         dd = data.get("due_date")
         sd = data.get("sent_to_contractor_date")
-        if md and dd and dd < md:
-            return "مهلت انجام نمی‌تواند قبل از تاریخ صورتجلسه باشد."
+        if entry and dd and dd < entry:
+            return "مهلت رسیدگی نمی‌تواند قبل از تاریخ ورود به کارفرما باشد."
         if md and sd and sd < md:
             return "تاریخ ارسال به پیمانکار نمی‌تواند قبل از تاریخ صورتجلسه باشد."
         return None
@@ -1151,12 +1161,8 @@ class MeetingDialog(QDialog):
                 self.meeting.file_link if self.meeting else None
             )
 
-            # entry_date = تاریخ ورود به کارفرما
-            if self.meeting and self.meeting.entry_date:
-                data["entry_date"] = self.meeting.entry_date
-            else:
-                data["entry_date"] = date.today()
-
+            # entry_date از فیلد فرم تبدیل‌شده به تاریخ میلادی دریافت می‌شود.
+            # مقدار ثبت‌شده در فرم، مبنای مهلت رسیدگی است.
             data["status"] = (
                 self.meeting.status if self.meeting else "در دست بررسی"
             )
