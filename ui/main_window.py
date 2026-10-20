@@ -332,7 +332,7 @@ class MeetingsPageModel(QAbstractTableModel):
         self.workflow_states: Dict[int, str] = {}
 
         self._col_status = self._find("وضعیت")
-        self._col_due = self._find("مهلت انجام")
+        self._col_due = self._find("مهلت رسیدگی")
         self._col_id = self._find("ردیف")
         self._col_meeting_number = self._find("شماره صورتجلسه")
         self._col_drawing_number = self._find("شماره نقشه")
@@ -2335,7 +2335,7 @@ class MainWindow(QMainWindow):
             "شماره صورتجلسه": "1404-001",
             "موضوع": "نمونه",
             "تاریخ صورتجلسه": today_shamsi(),
-            "مهلت انجام": today_shamsi(),
+            "مهلت رسیدگی": today_shamsi(),
             "وضعیت": STATUS_PENDING,
             "اولویت": PRIORITY_MEDIUM,
             "دیسیپلین": DISCIPLINES[0] if DISCIPLINES else "",
