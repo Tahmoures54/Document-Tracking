@@ -138,21 +138,23 @@ except ImportError:
 
 DATE_COLUMNS: frozenset = frozenset([
     "ارسال به نظارت", "ورود به نظارت", "ورود به کارفرما",
-    "تاریخ صورتجلسه", "تاریخ قرارداد",
-    "تاریخ ارسال به پیمانکار", "مهلت انجام", "تاریخ بسته شدن", "تاریخ پاسخ پیمانکار",
+    "تاریخ صورتجلسه", "تاریخ قرارداد", "تاریخ ثبت / ورود به کارفرما",
+    "تاریخ ارسال به پیمانکار", "مهلت رسیدگی", "مهلت انجام", "تاریخ بسته شدن", "تاریخ پاسخ پیمانکار",
 ])
 
 HEADER_TO_DB_COL: Dict[str, str] = {
     "ردیف": "id",
     "ارسال به نظارت": "sent_to_supervision_date",
     "ورود به نظارت": "supervision_entry_date",
+    "تاریخ ثبت / ورود به کارفرما": "entry_date",
     "ورود به کارفرما": "entry_date",
     "تاریخ صورتجلسه": "meeting_date",
     "شماره صورتجلسه": "meeting_number",
     "کارفرما": "employer", "مشاور": "consultant", "پیمانکار": "contractor",
     "شماره قرارداد": "contract_number", "تاریخ قرارداد": "contract_date",
     "موضوع": "subject", "دیسیپلین": "discipline", "محل کار": "location",
-    "وضعیت": "status", "اولویت": "priority", "مهلت انجام": "due_date",
+    "وضعیت": "status", "اولویت": "priority",
+    "مهلت رسیدگی": "due_date", "مهلت انجام": "due_date",
     "تاریخ بسته شدن": "closing_date",
     "تاریخ ارسال به پیمانکار": "sent_to_contractor_date",
     "تاریخ پاسخ پیمانکار": "contractor_response_date",

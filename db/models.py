@@ -201,7 +201,7 @@ class Meeting(Base):
         "ردیف":                     "id",
         "ارسال به نظارت":           "sent_to_supervision_date",
         "ورود به نظارت":            "supervision_entry_date",
-        "ورود به کارفرما":          "entry_date",
+        "تاریخ ثبت / ورود به کارفرما": "entry_date",
         "تاریخ صورتجلسه":           "meeting_date",
         "شماره صورتجلسه":           "meeting_number",
         "تعداد پیوست":              "attachment_count",
@@ -217,7 +217,7 @@ class Meeting(Base):
         "تاریخ ارسال به پیمانکار":  "sent_to_contractor_date",
         "وضعیت":                    "status",
         "اولویت":                   "priority",
-        "مهلت انجام":               "due_date",
+        "مهلت رسیدگی":              "due_date",
     }
 
     @classmethod

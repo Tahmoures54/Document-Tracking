@@ -496,12 +496,12 @@ class MeetingDialog(QDialog):
 
         # ── تاریخ‌ها ──
         self._add_date_row("meeting_date", "تاریخ صورتجلسه", required=True)
-        self._add_date_row("entry_date", "تاریخ ورود به کارفرما", required=True)
+        self._add_date_row("entry_date", "تاریخ ثبت / ورود به کارفرما", required=True)
         self._add_date_row("contract_date", "تاریخ قرارداد")
         self._add_date_row("sent_to_supervision_date", "ارسال به نظارت")
         self._add_date_row("supervision_entry_date", "ورود به دفتر نظارت")
         self._add_date_row("sent_to_contractor_date", "ابلاغ به پیمانکار")
-        self._add_date_row("due_date", "مهلت انجام", required=True)
+        self._add_date_row("due_date", "مهلت رسیدگی", required=True)
 
         # ── کمبوها ──
         self._add_combo("employer", "کارفرما")

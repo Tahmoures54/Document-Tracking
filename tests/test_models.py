@@ -84,3 +84,22 @@ def test_validate_due_before_meeting():
     )
     err = m.validate()
     assert err is not None
+
+
+
+def test_registration_date_column_uses_entry_date():
+    entry_date = date(2026, 10, 20)
+    m = Meeting(
+        meeting_number="T-REG-DATE",
+        subject="آزمون تاریخ ثبت",
+        entry_date=entry_date,
+        meeting_date=date(2026, 10, 19),
+        due_date=date(2026, 10, 23),
+    )
+    headers = Meeting.headers()
+    row = m.to_row(headers)
+
+    registration_col = headers.index("تاریخ ثبت / ورود به کارفرما")
+    due_col = headers.index("مهلت رسیدگی")
+    assert row[registration_col] == "2026-10-20"
+    assert row[due_col] == "2026-10-23"
