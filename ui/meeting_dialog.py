@@ -300,6 +300,31 @@ class _Toast(QFrame):
             self.move(14, p.height() - self.height() - 14)
 
 
+class _WheelSafeLineEdit(QLineEdit):
+    """از تغییر ناخواسته مقدار کمبوباکس با چرخ موس جلوگیری می‌کند."""
+
+    def wheelEvent(self, event) -> None:
+        # رویداد نادیده گرفته می‌شود تا در صورت امکان به ناحیه اسکرول فرم برسد.
+        event.ignore()
+
+
+class _WheelSafeComboBox(QComboBox):
+    """کمبوباکسی که چرخ موس فقط هنگام باز بودن فهرست روی گزینه‌ها اثر می‌گذارد."""
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.setEditable(True)
+        self.setLineEdit(_WheelSafeLineEdit(self))
+
+    def wheelEvent(self, event) -> None:
+        if self.view().isVisible():
+            # هنگام باز بودن فهرست، پیمایش گزینه‌ها طبیعی باقی بماند.
+            super().wheelEvent(event)
+        else:
+            # در حالت عادی مقدار انتخاب‌شده با چرخ موس عوض نشود.
+            event.ignore()
+
+
 # ═══════════════════════════════════════════════
 #  MeetingDialog
 # ═══════════════════════════════════════════════
@@ -600,8 +625,7 @@ class MeetingDialog(QDialog):
     def _add_combo(
         self, key: str, label: str, items: Optional[List[str]] = None
     ) -> QComboBox:
-        combo = QComboBox()
-        combo.setEditable(True)
+        combo = _WheelSafeComboBox()
         combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
         combo.setMinimumHeight(30)
         combo.addItem("")
