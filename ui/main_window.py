@@ -949,28 +949,92 @@ class MainWindow(QMainWindow):
         return bar
 
     def _build_status_legend(self) -> QWidget:
-        """راهنمای دائمی رنگ‌ها؛ رنگ تنها نشانه وضعیت نباشد."""
+        """راهنمای رنگ‌ها همراه با شمارش زنده تمام صورتجلسات هر وضعیت."""
         legend = QWidget()
         legend.setObjectName("status_legend")
         layout = QHBoxLayout(legend)
         layout.setContentsMargins(12, 7, 12, 7)
         layout.setSpacing(10)
 
-        title = QLabel("راهنمای وضعیت:")
+        title = QLabel("راهنمای وضعیت و تعداد صورتجلسات:")
         title.setObjectName("legend_title")
         layout.addWidget(title)
 
+        self._legend_count_labels: Dict[str, QLabel] = {}
         for label, bg, fg in LEGEND_ITEMS:
-            chip = QLabel(f"●  {label}")
+            chip = QLabel(f"●  {label} (—)")
             chip.setObjectName("status_legend_item")
+            chip.setToolTip("تعداد کل صورتجلسات فعال در این وضعیت؛ مستقل از فیلتر و صفحه جاری")
             chip.setStyleSheet(
                 f"QLabel#status_legend_item {{ background:{bg}; color:{fg}; "
                 "border:1px solid rgba(100,116,139,0.28); border-radius:10px; "
                 "padding:5px 10px; font-weight:600; }}"
             )
+            self._legend_count_labels[label] = chip
             layout.addWidget(chip)
         layout.addStretch(1)
         return legend
+
+    def _refresh_status_legend_counts(self) -> None:
+        """شمارش تمام صورتجلسات فعال بر اساس همان منطق وضعیت رنگی جدول."""
+        if not getattr(self, "_legend_count_labels", None):
+            return
+
+        try:
+            with self.db.session() as sess:
+                meetings = (
+                    sess.query(Meeting.id, Meeting.status, Meeting.sent_to_contractor_date)
+                    .filter(Meeting.is_deleted.is_(False))
+                    .all()
+                )
+                meeting_ids = [int(row[0]) for row in meetings]
+                workflow_map: Dict[int, List[str]] = {}
+                if meeting_ids:
+                    steps = (
+                        sess.query(WorkflowStep.meeting_id, WorkflowStep.status)
+                        .filter(WorkflowStep.meeting_id.in_(meeting_ids))
+                        .order_by(WorkflowStep.meeting_id, WorkflowStep.step_order.asc())
+                        .all()
+                    )
+                    for meeting_id, step_status in steps:
+                        workflow_map.setdefault(int(meeting_id), []).append(str(step_status or ""))
+
+            counts = {
+                "in_progress": 0,
+                "pending": 0,
+                "returned": 0,
+                "completed": 0,
+                "cancelled": 0,
+                "unknown": 0,
+            }
+            for meeting_id, meeting_status, dispatched_at in meetings:
+                state = derive_workflow_state(
+                    meeting_status,
+                    workflow_map.get(int(meeting_id), []),
+                    dispatched_at is not None,
+                )
+                counts[state if state in counts else "unknown"] += 1
+
+            display_counts = {
+                "در حال انجام": counts["in_progress"],
+                "در انتظار": counts["pending"],
+                "برگشت برای اصلاح": counts["returned"],
+                "تکمیل و ابلاغ‌شده": counts["completed"],
+                "لغوشده / نامشخص": counts["cancelled"] + counts["unknown"],
+            }
+            for label, value in display_counts.items():
+                chip = self._legend_count_labels.get(label)
+                if chip is not None:
+                    chip.setText(f"●  {label} ({value:,})")
+                    chip.setToolTip(
+                        f"{value:,} صورتجلسه فعال در وضعیت «{label}»؛ "
+                        "شمارش مستقل از فیلترها و صفحه جاری"
+                    )
+        except Exception:
+            logger.exception("Failed to refresh status legend counts")
+            for label, chip in self._legend_count_labels.items():
+                chip.setText(f"●  {label} (—)")
+                chip.setToolTip("محاسبه تعداد وضعیت‌ها ناموفق بود؛ برای تلاش دوباره بروزرسانی کنید")
 
     def _build_table(self) -> QTableView:
         self.view = QTableView()
@@ -1555,6 +1619,7 @@ class MainWindow(QMainWindow):
         self._hide_id_column()
         self._auto_size_columns()
         self._update_stats()
+        self._refresh_status_legend_counts()
         self._update_title()
 
     def _to_rows(self, meetings: List[Meeting]) -> List[List[Any]]:
